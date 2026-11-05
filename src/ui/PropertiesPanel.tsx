@@ -5,6 +5,7 @@ import { FONT_FAMILY_CSS, FONT_SIZES, ROUGHNESS_LEVELS, STROKE_WIDTHS } from "..
 import type { ElementType, ItemStyle, SketchElement } from "../scene/types";
 import type { ToolType } from "../state/appState";
 import { applyItemStyle, convertSelectedType, selectedElements, setTextMode, setViewBackground } from "../state/operations";
+import { renameFrame } from "../state/rich";
 import { stylePatchFor } from "../state/style";
 import { ArrowheadPicker } from "./ArrowheadPicker";
 import { BACKGROUND_TOP_PICKS, STROKE_TOP_PICKS, VIEW_BACKGROUNDS } from "./colors";
@@ -19,6 +20,7 @@ const TOOL_TYPES: Partial<Record<ToolType, ElementType>> = {
   arrow: "arrow",
   line: "line",
   freedraw: "freedraw",
+  autoshape: "freedraw", // draws freehand, so it shares the pen's options
   text: "text",
 };
 
@@ -105,6 +107,33 @@ function ActionRow({ label, children, testId }: { label: string; children: React
   );
 }
 
+/** Name and membership of the selected frame. */
+function FrameSection({ id, name }: { id: string; name: string | null }) {
+  const store = useStore();
+  return (
+    <section data-testid="frame-section">
+      <h3>Frame</h3>
+      <input
+        className="text-input"
+        value={name ?? ""}
+        placeholder="Frame"
+        aria-label="Frame name"
+        data-testid="frame-name"
+        spellCheck={false}
+        onChange={(e) => renameFrame(store, id, e.target.value)}
+        onBlur={() => store.commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+      />
+      <div className="choices actions" style={{ marginTop: 8 }}>
+        <ActionButton name="selectAllInFrame" icon="group" />
+        <ActionButton name="removeFromFrame" icon="ungroup" />
+      </div>
+    </section>
+  );
+}
+
 export function PropertiesPanel() {
   const store = useStore();
   useStoreVersion();
@@ -112,6 +141,26 @@ export function PropertiesPanel() {
   const sel = selectedElements(store);
   const toolType = TOOL_TYPES[s.tool];
   const kinds = new Set<ElementType>(sel.length ? sel.map((e) => e.type) : toolType ? [toolType] : []);
+
+  // Bucket fill paints closed shapes with the background colour chosen here.
+  if (s.tool === "bucket" && sel.length === 0) {
+    return (
+      <div className="island panel" aria-label="Bucket fill" data-testid="properties-panel">
+        <section>
+          <h3>{t("prop.background")}</h3>
+          <ColorField
+            label={t("prop.background")}
+            value={s.currentItem.backgroundColor}
+            picks={BACKGROUND_TOP_PICKS}
+            allowTransparent
+            onChange={(c) => applyItemStyle(store, { backgroundColor: c })}
+            testId="background-color"
+            eyedropper="background"
+          />
+        </section>
+      </div>
+    );
+  }
 
   // Nothing to style: with the selection tool and an empty selection the panel offers the canvas background.
   if (kinds.size === 0) {
@@ -139,6 +188,9 @@ export function PropertiesPanel() {
   const isShape = has("rectangle", "diamond", "ellipse");
   const hasFill = isShape || sel.some((e) => e.type === "line" && e.polygon);
   const hasStrokeLook = isShape || has("line", "arrow");
+  // Pictures, frames and embeds have no stroke or fill of their own (pictures and embeds can still be faded).
+  const hasStyle = [...kinds].some((k) => k !== "image" && k !== "frame" && k !== "embeddable");
+  const hasOpacity = hasStyle || has("image", "embeddable");
   const opacity = val("opacity");
   const looseTexts = sel.filter((e) => e.type === "text" && !e.containerId);
   const textMode: "auto" | "fixed" | null =
@@ -150,10 +202,12 @@ export function PropertiesPanel() {
 
   return (
     <div className="island panel" aria-label="Properties" data-testid="properties-panel">
-      <section>
-        <h3>{t("prop.stroke")}</h3>
-        <ColorField label={t("prop.stroke")} value={val("strokeColor")} picks={STROKE_TOP_PICKS} onChange={(c) => set({ strokeColor: c })} testId="stroke-color" eyedropper="stroke" />
-      </section>
+      {hasStyle && (
+        <section>
+          <h3>{t("prop.stroke")}</h3>
+          <ColorField label={t("prop.stroke")} value={val("strokeColor")} picks={STROKE_TOP_PICKS} onChange={(c) => set({ strokeColor: c })} testId="stroke-color" eyedropper="stroke" />
+        </section>
+      )}
 
       {hasFill && (
         <section>
@@ -185,7 +239,7 @@ export function PropertiesPanel() {
         />
       )}
 
-      {!has("text") || kinds.size > 1 ? (
+      {hasStyle && (!has("text") || kinds.size > 1) ? (
         <ChoiceRow
           label={t("prop.strokeWidth")}
           testId="stroke-width"
@@ -344,21 +398,35 @@ export function PropertiesPanel() {
         </>
       )}
 
-      <section>
-        <h3>
-          {t("prop.opacity")} <span className="muted">{opacity === null ? "—" : opacity}</span>
-        </h3>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={10}
-          value={opacity ?? 100}
-          aria-label={t("prop.opacity")}
-          data-testid="opacity"
-          onChange={(e) => set({ opacity: Number(e.target.value) })}
-        />
-      </section>
+      {hasOpacity && (
+        <section>
+          <h3>
+            {t("prop.opacity")} <span className="muted">{opacity === null ? "—" : opacity}</span>
+          </h3>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={10}
+            value={opacity ?? 100}
+            aria-label={t("prop.opacity")}
+            data-testid="opacity"
+            onChange={(e) => set({ opacity: Number(e.target.value) })}
+          />
+        </section>
+      )}
+
+      {sel.length === 1 && sel[0].type === "image" && (
+        <ActionRow label="Image" testId="image-actions">
+          <ActionButton name="cropImage" icon="crop" />
+        </ActionRow>
+      )}
+      {sel.length === 1 && sel[0].type === "frame" && <FrameSection id={sel[0].id} name={sel[0].name} />}
+      {sel.length === 1 && sel[0].type === "embeddable" && (
+        <ActionRow label="Embed" testId="embed-actions">
+          <ActionButton name="editEmbedLink" icon="link" />
+        </ActionRow>
+      )}
 
       {sel.length > 0 && (
         <>
@@ -426,6 +494,8 @@ export function PropertiesPanel() {
             {looseTexts.length > 0 && <ActionButton name="wrapTextInContainer" icon="wrapText" />}
             <ActionButton name="bindText" icon="bindText" hideWhenDisabled />
             <ActionButton name="unbindText" icon="unbindText" hideWhenDisabled />
+            <ActionButton name="wrapInFrame" icon="frame" hideWhenDisabled />
+            {sel.some((e) => e.type !== "frame" && e.frameId !== null) && <ActionButton name="removeFromFrame" icon="ungroup" />}
           </ActionRow>
         </>
       )}

@@ -1,24 +1,37 @@
 import type { Point } from "../geometry/math";
 import { clearGuides, snapPointer } from "../input/snapping";
 import type { PointerInfo, ToolHandler } from "../input/types";
-import { newShape } from "../scene/factory";
-import type { ShapeElement } from "../scene/types";
+import { newEmbeddable, newFrame, newShape } from "../scene/factory";
+import { nextFrameName } from "../scene/frames";
+import type { ShapeElement, SketchElement } from "../scene/types";
 import { finishDrawing } from "../state/operations";
+import { openEmbedDialog } from "../state/rich";
 import type { Store } from "../state/store";
 
-/** Rectangle, diamond and ellipse: drag to size (Shift = square, Alt = from centre). Corners snap when snapping is on. */
+export type DragShapeKind = ShapeElement["type"] | "frame" | "embeddable";
+
+/**
+ * Rectangle, diamond, ellipse, frame and web embed: drag to size (Shift = square, Alt = from centre). Corners snap
+ * when snapping is on. A new embed asks for its address when the drag ends.
+ */
 export class ShapeTool implements ToolHandler {
   private id: string | null = null;
   private origin: Point = [0, 0];
 
   constructor(
     private store: Store,
-    private type: ShapeElement["type"],
+    private kind: DragShapeKind,
   ) {}
+
+  private create(x: number, y: number): SketchElement {
+    if (this.kind === "frame") return newFrame(x, y, 0, 0, nextFrameName(this.store.scene.all()));
+    if (this.kind === "embeddable") return newEmbeddable(x, y, 0, 0);
+    return newShape(this.kind, x, y, this.store.state.currentItem);
+  }
 
   down(e: PointerInfo) {
     this.origin = snapPointer(this.store, e.scene, new Set(), e.ctrlKey || e.metaKey);
-    const el = newShape(this.type, this.origin[0], this.origin[1], this.store.state.currentItem);
+    const el = this.create(this.origin[0], this.origin[1]);
     this.store.scene.add(el);
     this.id = el.id;
     this.store.select([]);
@@ -55,6 +68,11 @@ export class ShapeTool implements ToolHandler {
     // A click without a drag draws nothing.
     if (Math.max(el.width, el.height) * this.store.state.zoom < 3) {
       this.store.scene.remove(el.id);
+      return;
+    }
+    if (el.type === "embeddable") {
+      // Not part of the history until it has an address.
+      openEmbedDialog(this.store, el.id);
       return;
     }
     this.store.select([el.id]);

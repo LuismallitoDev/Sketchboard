@@ -19,6 +19,8 @@ const TOGGLES: { key: Preference; icon: IconName; testId: string }[] = [
   { key: "objectsSnap", icon: "magnet", testId: "toggle-objects-snap" },
   { key: "arrowBinding", icon: "link", testId: "toggle-arrow-binding" },
   { key: "midpointSnapping", icon: "midpoint", testId: "toggle-midpoint-snapping" },
+  { key: "frameRendering", icon: "frame", testId: "toggle-frame-rendering" },
+  { key: "penMode", icon: "penMode", testId: "toggle-pen-mode" },
 ];
 
 export function Footer() {

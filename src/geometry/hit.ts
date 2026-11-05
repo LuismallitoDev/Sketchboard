@@ -58,7 +58,18 @@ export function hitElement(el: SketchElement, scenePoint: Point, tolerance: numb
       return distanceToPolyline(p, abs) <= tol + el.strokeWidth * 1.5;
     }
     case "text":
+    case "image":
+    case "embeddable":
       return isPointInBox(p, box, tol);
+    case "frame": {
+      // A frame is selected by its outline or by its name; its inside is not a target (the elements in it are).
+      const unit = tolerance / 8; // scene units per screen pixel
+      const labelWidth = Math.min(box.width, ((el.name ?? "Frame").length * 7 + 12) * unit);
+      if (p[0] >= box.x && p[0] <= box.x + labelWidth && p[1] >= box.y - 24 * unit && p[1] <= box.y) return true;
+      if (!isPointInBox(p, box, tol)) return false;
+      const inner = p[0] > box.x + tol && p[0] < box.x + box.width - tol && p[1] > box.y + tol && p[1] < box.y + box.height - tol;
+      return !inner;
+    }
   }
 }
 
@@ -85,11 +96,16 @@ export function isInsideShape(el: SketchElement, scenePoint: Point): boolean {
  * The topmost hittable element at the point (locked and deleted elements are skipped). A label counts as part of
  * its container, so hitting the text returns the container.
  */
-export function topElementAt(elements: readonly SketchElement[], p: Point, tolerance: number): SketchElement | null {
+export function topElementAt(elements: readonly SketchElement[], p: Point, tolerance: number, clipToFrames = true): SketchElement | null {
   for (let i = elements.length - 1; i >= 0; i--) {
     const el = elements[i];
     if (el.isDeleted || el.locked) continue;
     if (!hitElement(el, p, tolerance)) continue;
+    // What a frame clips away cannot be clicked either.
+    if (clipToFrames && el.frameId) {
+      const frame = elements.find((f) => f.id === el.frameId && f.type === "frame" && !f.isDeleted);
+      if (frame && !isPointInBox(p, getLocalBox(frame))) continue;
+    }
     if (el.type === "text" && el.containerId) {
       const container = elements.find((e) => e.id === el.containerId && !e.isDeleted);
       if (container) return container.locked ? null : container;

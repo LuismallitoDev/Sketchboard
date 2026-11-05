@@ -47,6 +47,9 @@ export class History {
     this.snapshotOrder = all.map((e) => e.id);
   }
 
+  /** The element as it was at the last commit (undefined if it did not exist then). */
+  previous = (id: string): SketchElement | undefined => this.snapshot.get(id);
+
   canUndo = () => this.undoStack.length > 0;
   canRedo = () => this.redoStack.length > 0;
 

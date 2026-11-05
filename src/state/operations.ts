@@ -9,6 +9,7 @@ import { boundTextsOf } from "../scene/boundText";
 import { MAX_ZOOM, MIN_ZOOM } from "../scene/constants";
 import { cloneElements, newShape, newText } from "../scene/factory";
 import { flipPatches } from "../scene/flip";
+import { withFrameChildren } from "../scene/frames";
 import { canGroup, canUngroup, groupPatches, ungroupPatches } from "../scene/groups";
 import { linearPatch, linearPatchFromAbs } from "../scene/linear";
 import { isBoundText, resolveSelection, withBoundTexts } from "../scene/selection";
@@ -54,6 +55,13 @@ function applyPatches(store: Store, patches: ElementPatches) {
 export function setTool(store: Store, tool: ToolType) {
   if (store.state.editingTextId) finishTextEdit(store);
   if (store.state.editingLinearId) exitLinearEdit(store);
+  if (store.state.croppingId) {
+    store.setState({ croppingId: null });
+    store.commit();
+  }
+  if (store.state.activeEmbedId || store.state.editingFrameId || store.state.lassoPath.length > 0) {
+    store.setState({ activeEmbedId: null, editingFrameId: null, lassoPath: [] });
+  }
   // Picking a drawing tool (or the eraser) clears the selection; the hand tool and selection tool keep it.
   const keepSelection = tool === "selection" || tool === "hand";
   store.setState({
@@ -72,7 +80,8 @@ export function finishDrawing(store: Store) {
 // ---------------------------------------------------------------- basic edits
 
 export function deleteSelected(store: Store) {
-  const sel = selectedElements(store);
+  // Deleting a frame deletes what is inside it too.
+  const sel = withFrameChildren(store.scene.visible(), selectedElements(store));
   if (sel.length === 0) return;
   // Labels follow their container (the scene normalizer deletes them), so only containers are listed here.
   store.scene.batch(() => {
@@ -85,9 +94,12 @@ export function deleteSelected(store: Store) {
 export function duplicateSelected(store: Store) {
   const sel = selectedElements(store);
   if (sel.length === 0) return;
-  const copies = cloneElements(withBoundTexts(store.scene.visible(), sel), 10, 10);
+  const visible = store.scene.visible();
+  // A copied frame takes what is inside it along; labels follow their containers.
+  const copies = cloneElements(withBoundTexts(visible, withFrameChildren(visible, sel)), 10, 10);
+  const copiedFrames = new Set(copies.filter((c) => c.type === "frame").map((c) => c.id));
   store.scene.batch(() => copies.forEach((c) => store.scene.add(c)));
-  store.select(copies.filter((c) => !isBoundText(c)).map((c) => c.id));
+  store.select(copies.filter((c) => !isBoundText(c) && !(c.frameId && copiedFrames.has(c.frameId))).map((c) => c.id));
   store.commit();
 }
 
@@ -109,7 +121,7 @@ export function detachUnselectedArrows(store: Store, moving: readonly SketchElem
 }
 
 export function nudgeSelected(store: Store, dx: number, dy: number) {
-  const sel = selectedElements(store).filter((e) => !e.locked);
+  const sel = withFrameChildren(store.scene.visible(), selectedElements(store)).filter((e) => !e.locked);
   if (sel.length === 0) return;
   detachUnselectedArrows(store, sel);
   store.scene.batch(() => {
@@ -164,7 +176,7 @@ export function flipSelected(store: Store, axis: "h" | "v") {
 
 // ---------------------------------------------------------------- snapping and binding preferences
 
-export type Preference = "arrowBinding" | "midpointSnapping" | "objectsSnap" | "gridMode";
+export type Preference = "arrowBinding" | "midpointSnapping" | "objectsSnap" | "gridMode" | "penMode" | "frameRendering";
 
 export function togglePreference(store: Store, key: Preference) {
   store.setState({ [key]: !store.state[key] });
@@ -369,7 +381,7 @@ export function editSelected(store: Store, pointsMode: boolean): boolean {
   if (el.locked) return false;
   if (el.type === "text") startTextEdit(store, el.id, false);
   else if (el.type === "line" || (el.type === "arrow" && pointsMode)) startLinearEdit(store, el.id);
-  else if (el.type === "freedraw") return false;
+  else if (el.type === "freedraw" || el.type === "image" || el.type === "frame" || el.type === "embeddable") return false;
   else startBoundTextEdit(store, el);
   return true;
 }
@@ -405,7 +417,7 @@ export function wrapSelectedTextInContainer(store: Store) {
 export function canBindText(sel: readonly SketchElement[], all: readonly SketchElement[]): boolean {
   if (sel.length !== 2) return false;
   const text = sel.find((e) => e.type === "text" && !e.containerId);
-  const container = sel.find((e) => e.type !== "text" && e.type !== "freedraw" && e.type !== "line");
+  const container = sel.find((e) => e.type === "rectangle" || e.type === "diamond" || e.type === "ellipse" || e.type === "arrow");
   return !!text && !!container && boundTextsOf(all, container.id).length === 0;
 }
 

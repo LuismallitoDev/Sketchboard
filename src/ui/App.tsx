@@ -5,15 +5,31 @@ import { closeDialog, confirmClearCanvas, resolveTheme } from "../state/operatio
 import type { Store } from "../state/store";
 import { CanvasLayer } from "./CanvasLayer";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { EmbedDialog } from "./EmbedDialog";
+import { ImageInput } from "./ImageInput";
 import { Footer, ThemeToggle } from "./Footer";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { StoreProvider, useStore, useStoreVersion } from "./StoreContext";
 import { Toolbar } from "./Toolbar";
 
+/** A short message at the bottom of the screen (rejected files and the like). */
+function Toast() {
+  const store = useStore();
+  useStoreVersion();
+  const notice = store.state.notice;
+  if (!notice) return null;
+  return (
+    <div className="toast island" role="status" data-testid="notice">
+      {notice}
+    </div>
+  );
+}
+
 /** Modal dialogs requested through the app state. */
 function Dialogs() {
   const store = useStore();
   useStoreVersion();
+  if (store.state.dialog === "embed") return <EmbedDialog key={store.state.embedDraftId} />;
   if (store.state.dialog !== "clear") return null;
   return (
     <ConfirmDialog
@@ -66,6 +82,8 @@ export function App({ store }: { store: Store }) {
         <PropertiesPanel />
         <ThemeToggle />
         <Footer />
+        <Toast />
+        <ImageInput />
         <Dialogs />
       </div>
     </StoreProvider>

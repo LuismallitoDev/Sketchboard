@@ -70,6 +70,8 @@ body {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  /* Its layers (scene, embeds, overlay, text editor) stack among themselves, below the panels and toolbars. */
+  isolation: isolate;
 }
 
 .static-canvas,
@@ -517,4 +519,175 @@ input[type="range"] {
   .choice {
     transition: background-color 0.12s ease;
   }
+}
+
+/* ---- Phase 4: more tools, embeds, dialogs, notices ---- */
+
+.canvas-wrap > .static-canvas {
+  z-index: 0;
+}
+
+.embed-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* While an embed is active its page must be above the selection overlay to receive the mouse. */
+.embed-layer.has-active {
+  z-index: 4;
+}
+
+.interactive-canvas {
+  z-index: 2;
+}
+
+.dom-layer {
+  z-index: 3;
+}
+
+.embed {
+  position: absolute;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+
+.embed.active {
+  pointer-events: auto;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.embed iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.embed-interact {
+  position: absolute;
+  transform: translateX(-100%);
+  pointer-events: auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  font: 700 12px "Nunito", system-ui, sans-serif;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.embed-interact:hover {
+  background: var(--ui-hover);
+}
+
+.frame-name-editor {
+  position: absolute;
+  pointer-events: auto;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  font: 600 12px "Nunito", system-ui, sans-serif;
+  outline: none;
+}
+
+.tool-slot {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.tool-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  gap: 4px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ui-fg);
+  font: 600 13px "Nunito", system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background: var(--ui-hover);
+}
+
+.menu-item[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.menu-item span {
+  flex: 1;
+}
+
+.menu-item kbd {
+  font: 700 10px "Nunito", sans-serif;
+  color: var(--ui-muted);
+}
+
+.url-input,
+.text-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  font: 600 13px "Nunito", system-ui, sans-serif;
+}
+
+.url-input[aria-invalid="true"] {
+  border-color: #dc2626;
+}
+
+.form-error {
+  margin: 8px 0 0 !important;
+  color: #dc2626 !important;
+  font-size: 13px;
+}
+
+.dialog .url-input {
+  margin-bottom: 4px;
+}
+
+.btn-text.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .btn-text.primary {
+  color: #0b1f1d;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 74px;
+  transform: translateX(-50%);
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 10px 16px;
+  font-weight: 600;
+  line-height: 1.4;
 }

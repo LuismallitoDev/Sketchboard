@@ -198,6 +198,8 @@ function getEntry(el: SketchElement, zoom: number, dpr: number): CanvasEntry {
   } else if (el.type === "freedraw") {
     ctx.fillStyle = el.strokeColor;
     ctx.fill(freedrawPath(el));
+  } else if (el.type === "image" || el.type === "frame" || el.type === "embeddable") {
+    // Drawn straight onto the scene canvas (see renderStatic), not through this cache.
   } else {
     const rc = rough.canvas(canvas);
     for (const d of drawablesFor(el)) rc.draw(d);

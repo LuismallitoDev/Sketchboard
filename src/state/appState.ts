@@ -13,7 +13,21 @@ export type ToolType =
   | "freedraw"
   | "text"
   | "eraser"
-  | "hand";
+  | "hand"
+  | "frame"
+  | "sticky"
+  | "embed"
+  | "laser"
+  | "lasso"
+  | "autoshape"
+  | "bucket";
+
+/** A point of the laser pointer's trail; `t` is when it was drawn (ms), so it can fade away. */
+export interface LaserPoint {
+  x: number;
+  y: number;
+  t: number;
+}
 
 export type Theme = "light" | "dark" | "system";
 
@@ -46,9 +60,28 @@ export interface AppState {
   selectedPoints: readonly number[];
   /** Colour picking from the canvas: which colour it will set, and the colour under the pointer. */
   eyedropper: { target: "stroke" | "background"; color: string | null; x: number; y: number } | null;
-  dialog: "clear" | null;
+  dialog: "clear" | "embed" | null;
   /** Style copied with "copy style", pasted onto other elements. */
   copiedStyle: Partial<ItemStyle> | null;
+
+  /** The image whose crop is being edited. */
+  croppingId: string | null;
+  /** The frame whose name is being edited. */
+  editingFrameId: string | null;
+  /** The embed being given its address (it exists on the canvas but has no address yet, or is being changed). */
+  embedDraftId: string | null;
+  /** The embed that receives the mouse (clicks go to the page inside it instead of the canvas). */
+  activeEmbedId: string | null;
+  /** The lasso being drawn (scene coordinates). */
+  lassoPath: readonly (readonly [number, number])[];
+  laserTrail: readonly LaserPoint[];
+  /** A short message shown at the bottom of the screen. */
+  notice: string | null;
+
+  /** Touch input does nothing, so a resting hand cannot draw while a pen is used. */
+  penMode: boolean;
+  /** Frames show their outline and name and clip what is inside them. */
+  frameRendering: boolean;
 
   /** Arrow ends attach to shapes they are dropped on. */
   arrowBinding: boolean;
@@ -88,6 +121,15 @@ export function defaultAppState(): AppState {
     eyedropper: null,
     dialog: null,
     copiedStyle: null,
+    croppingId: null,
+    editingFrameId: null,
+    embedDraftId: null,
+    activeEmbedId: null,
+    lassoPath: [],
+    laserTrail: [],
+    notice: null,
+    penMode: false,
+    frameRendering: true,
     arrowBinding: true,
     midpointSnapping: false,
     objectsSnap: false,
@@ -112,5 +154,7 @@ export const PERSISTED_KEYS = [
   "midpointSnapping",
   "objectsSnap",
   "gridMode",
+  "penMode",
+  "frameRendering",
 ] as const;
 export type PersistedState = Pick<AppState, (typeof PERSISTED_KEYS)[number]>;

@@ -1,7 +1,17 @@
 /** A point as stored in element data (JSON-safe tuple). */
 export type Pt = [number, number];
 
-export type ElementType = "rectangle" | "diamond" | "ellipse" | "line" | "arrow" | "freedraw" | "text";
+export type ElementType =
+  | "rectangle"
+  | "diamond"
+  | "ellipse"
+  | "line"
+  | "arrow"
+  | "freedraw"
+  | "text"
+  | "image"
+  | "frame"
+  | "embeddable";
 export type FillStyle = "hachure" | "cross-hatch" | "solid" | "zigzag";
 export type StrokeStyle = "solid" | "dashed" | "dotted";
 export type Arrowhead =
@@ -112,7 +122,46 @@ export interface TextElement extends ElementBase {
   wrapWidth: number | null;
 }
 
-export type SketchElement = ShapeElement | LinearElement | FreedrawElement | TextElement;
+/** The part of an image that is shown, in the image's own pixels. */
+export interface ImageCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Size of the whole image, so the crop can be widened again. */
+  naturalWidth: number;
+  naturalHeight: number;
+}
+
+export interface ImageElement extends ElementBase {
+  type: "image";
+  /** Key of the picture in the file store (a SHA-1 of its bytes); null while it has not been stored. */
+  fileId: string | null;
+  status: "pending" | "saved" | "error";
+  /** [-1 | 1, -1 | 1]: mirrored horizontally / vertically. */
+  scale: [number, number];
+  crop: ImageCrop | null;
+}
+
+/** A named region. Elements placed inside it (their `frameId`) move with it and are clipped to it. */
+export interface FrameElement extends ElementBase {
+  type: "frame";
+  name: string | null;
+}
+
+/** A website shown in an iframe; its address is the element's `link`. */
+export interface EmbeddableElement extends ElementBase {
+  type: "embeddable";
+}
+
+export type SketchElement =
+  | ShapeElement
+  | LinearElement
+  | FreedrawElement
+  | TextElement
+  | ImageElement
+  | FrameElement
+  | EmbeddableElement;
 export type PointsElement = LinearElement | FreedrawElement;
 
 /** Drawing defaults ("current item style"): what the next element will look like. */

@@ -9,6 +9,7 @@ import type {
   ElementType,
   FillStyle,
   FontFamily,
+  ImageCrop,
   ItemStyle,
   Pt,
   SketchElement,
@@ -25,7 +26,7 @@ function oneOf<T extends string>(v: unknown, list: readonly T[], d: T): T {
   return typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : d;
 }
 
-const TYPES: readonly ElementType[] = ["rectangle", "diamond", "ellipse", "line", "arrow", "freedraw", "text"];
+const TYPES: readonly ElementType[] = ["rectangle", "diamond", "ellipse", "line", "arrow", "freedraw", "text", "image", "frame", "embeddable"];
 const FILLS: readonly FillStyle[] = ["hachure", "cross-hatch", "solid", "zigzag"];
 const STROKES: readonly StrokeStyle[] = ["solid", "dashed", "dotted"];
 const FONTS: readonly FontFamily[] = ["hand", "normal", "code"];
@@ -174,7 +175,32 @@ export function restoreElement(raw: unknown): SketchElement | null {
         wrapWidth,
       };
     }
+    case "image": {
+      const fileId = typeof r.fileId === "string" && r.fileId ? r.fileId : null;
+      const flip = (v: unknown): number => (v === -1 ? -1 : 1);
+      const scale: [number, number] = Array.isArray(r.scale) ? [flip(r.scale[0]), flip(r.scale[1])] : [1, 1];
+      // An image that never got stored cannot be shown again.
+      const status = fileId ? oneOf(r.status, ["pending", "saved", "error"] as const, "saved") : "error";
+      return { ...base, type, fileId, status, scale, crop: restoreCrop(r.crop) };
+    }
+    case "frame":
+      return { ...base, type, name: typeof r.name === "string" ? r.name : null };
+    case "embeddable":
+      return { ...base, type };
   }
+}
+
+function restoreCrop(v: unknown): ImageCrop | null {
+  if (!v || typeof v !== "object") return null;
+  const c = v as Record<string, unknown>;
+  const nums = ["x", "y", "width", "height", "naturalWidth", "naturalHeight"].map((k) => c[k]);
+  if (!nums.every((n) => typeof n === "number" && Number.isFinite(n))) return null;
+  const [x, y, width, height, naturalWidth, naturalHeight] = nums as number[];
+  if (width <= 0 || height <= 0 || naturalWidth <= 0 || naturalHeight <= 0) return null;
+  // Keep the crop inside the picture.
+  const cx = Math.min(Math.max(x, 0), naturalWidth - 1);
+  const cy = Math.min(Math.max(y, 0), naturalHeight - 1);
+  return { x: cx, y: cy, width: Math.min(width, naturalWidth - cx), height: Math.min(height, naturalHeight - cy), naturalWidth, naturalHeight };
 }
 
 /** Restores a list of elements, dropping unusable ones and duplicate ids. */
@@ -223,7 +249,7 @@ export function restoreAppState(raw: unknown): Partial<PersistedState> {
   if (typeof r.zoom === "number" && Number.isFinite(r.zoom)) out.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, r.zoom));
   if (typeof r.theme === "string") out.theme = oneOf(r.theme, THEMES, "system");
   if (typeof r.viewBackgroundColor === "string") out.viewBackgroundColor = r.viewBackgroundColor;
-  for (const flag of ["arrowBinding", "midpointSnapping", "objectsSnap", "gridMode"] as const) {
+  for (const flag of ["arrowBinding", "midpointSnapping", "objectsSnap", "gridMode", "penMode", "frameRendering"] as const) {
     if (typeof r[flag] === "boolean") out[flag] = r[flag] as boolean;
   }
   if (r.currentItem !== undefined) out.currentItem = restoreItemStyle(r.currentItem);

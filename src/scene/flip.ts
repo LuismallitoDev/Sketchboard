@@ -28,6 +28,9 @@ export function flipPatches(els: readonly SketchElement[], axis: "h" | "v"): Ele
       });
       return [el.id, { ...linearPatchFromAbs(abs), angle }];
     }
-    return [el.id, { x: nc[0] - box.width / 2, y: nc[1] - box.height / 2, angle }];
+    // A mirrored picture is drawn mirrored (its own flip flags), on top of moving and turning like any element.
+    const mirrored: Partial<SketchElement> =
+      el.type === "image" ? { scale: axis === "h" ? [-el.scale[0], el.scale[1]] : [el.scale[0], -el.scale[1]] } : {};
+    return [el.id, { x: nc[0] - box.width / 2, y: nc[1] - box.height / 2, angle, ...mirrored }];
   });
 }

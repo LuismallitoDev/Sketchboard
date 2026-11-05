@@ -12,7 +12,6 @@ import {
   deleteSelected,
   distributeSelected,
   duplicateSelected,
-  editSelected,
   flipSelected,
   groupSelected,
   hasBoundText,
@@ -38,6 +37,7 @@ import {
   type Preference,
 } from "../state/operations";
 import { createFlowchartNode, navigateFlowchart, type FlowDirection } from "../state/flowchart";
+import { editSelectedAny, removeFromFrame, selectAllInFrame, wrapSelectionInFrame } from "../state/rich";
 import type { Store } from "../state/store";
 
 /**
@@ -59,7 +59,8 @@ const plain = (e: KeyboardEvent) => !e.ctrlKey && !e.metaKey && !e.altKey && !e.
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 export const MOD_LABEL = isMac ? "⌘" : "Ctrl+";
 
-export const TOOL_DEFS: { tool: ToolType; letter: string; digit?: string; label: StringKey }[] = [
+/** `group: "more"` tools live in the toolbar's "More tools" menu. */
+export const TOOL_DEFS: { tool: ToolType; letter: string; digit?: string; label: StringKey; group?: "more" }[] = [
   { tool: "hand", letter: "h", label: "tool.hand" },
   { tool: "selection", letter: "v", digit: "1", label: "tool.selection" },
   { tool: "rectangle", letter: "r", digit: "2", label: "tool.rectangle" },
@@ -70,7 +71,17 @@ export const TOOL_DEFS: { tool: ToolType; letter: string; digit?: string; label:
   { tool: "freedraw", letter: "p", digit: "7", label: "tool.freedraw" },
   { tool: "text", letter: "t", digit: "8", label: "tool.text" },
   { tool: "eraser", letter: "e", digit: "0", label: "tool.eraser" },
+  { tool: "frame", letter: "f", label: "tool.frame", group: "more" },
+  { tool: "sticky", letter: "n", label: "tool.sticky", group: "more" },
+  { tool: "embed", letter: "m", label: "tool.embed", group: "more" },
+  { tool: "laser", letter: "k", label: "tool.laser", group: "more" },
+  { tool: "lasso", letter: "u", label: "tool.lasso", group: "more" },
+  { tool: "autoshape", letter: "w", label: "tool.autoshape", group: "more" },
+  { tool: "bucket", letter: "g", label: "tool.bucket", group: "more" },
 ];
+
+/** Asks the app to open its image file picker (the picker itself is a hidden input mounted in the UI). */
+export const PICK_IMAGE_EVENT = "sketchboard:pick-image";
 
 const toolActions: Action[] = TOOL_DEFS.map((d) => ({
   name: `tool:${d.tool}`,
@@ -150,6 +161,8 @@ const flowActions: Action[] = FLOW_DIRS.flatMap((d) => [
 ]);
 
 const PREFERENCES: { key: Preference; label: StringKey; shortcut: string; test: (e: KeyboardEvent) => boolean }[] = [
+  { key: "frameRendering", label: "action.toggleFrameRendering", shortcut: "Alt+F", test: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyF" },
+  { key: "penMode", label: "action.togglePenMode", shortcut: "", test: () => false },
   { key: "gridMode", label: "action.toggleGrid", shortcut: `${MOD_LABEL}'`, test: (e) => mod(e) && !e.shiftKey && !e.altKey && e.code === "Quote" },
   { key: "objectsSnap", label: "action.toggleObjectsSnap", shortcut: "Alt+S", test: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyS" },
   { key: "arrowBinding", label: "action.toggleArrowBinding", shortcut: "Alt+B", test: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyB" },
@@ -323,12 +336,51 @@ export const actions: Action[] = [
 
   // text and lines
   {
+    name: "insertImage",
+    label: t("action.insertImage"),
+    shortcut: "9",
+    keyTest: (e) => plain(e) && e.key === "9",
+    perform: () => void window.dispatchEvent(new CustomEvent(PICK_IMAGE_EVENT)),
+  },
+  {
+    name: "cropImage",
+    label: t("action.cropImage"),
+    enabled: (s) => selCount(s) === 1 && selectedElements(s)[0].type === "image",
+    perform: (s) => void editSelectedAny(s, false),
+  },
+  {
+    name: "wrapInFrame",
+    label: t("action.wrapInFrame"),
+    shortcut: `${MOD_LABEL}Shift+F`,
+    keyTest: (e) => mod(e) && e.shiftKey && !e.altKey && e.code === "KeyF",
+    enabled: (s) => selectedElements(s).some((e) => e.type !== "frame"),
+    perform: wrapSelectionInFrame,
+  },
+  {
+    name: "selectAllInFrame",
+    label: t("action.selectAllInFrame"),
+    enabled: (s) => selectedElements(s).some((e) => e.type === "frame"),
+    perform: selectAllInFrame,
+  },
+  {
+    name: "removeFromFrame",
+    label: t("action.removeFromFrame"),
+    enabled: (s) => selectedElements(s).some((e) => e.type === "frame" || e.frameId !== null),
+    perform: removeFromFrame,
+  },
+  {
+    name: "editEmbedLink",
+    label: t("action.editEmbedLink"),
+    enabled: (s) => selCount(s) === 1 && selectedElements(s)[0].type === "embeddable",
+    perform: (s) => void editSelectedAny(s, false),
+  },
+  {
     name: "editSelected",
     label: t("action.editSelected"),
     shortcut: "Enter",
     keyTest: (e) => e.key === "Enter" && !mod(e) && !e.shiftKey && !e.altKey,
     enabled: (s) => selCount(s) === 1,
-    perform: (s) => void editSelected(s, false),
+    perform: (s) => void editSelectedAny(s, false),
   },
   {
     name: "editPoints",
@@ -336,7 +388,7 @@ export const actions: Action[] = [
     shortcut: `${MOD_LABEL}Enter`,
     keyTest: (e) => e.key === "Enter" && mod(e) && !e.shiftKey && !e.altKey,
     enabled: (s) => selectedElements(s).length === 1 && ["line", "arrow"].includes(selectedElements(s)[0].type),
-    perform: (s) => void editSelected(s, true),
+    perform: (s) => void editSelectedAny(s, true),
   },
   {
     name: "wrapTextInContainer",

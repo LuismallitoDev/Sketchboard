@@ -1,10 +1,14 @@
 import { measureText } from "../geometry/text";
-import { LINE_HEIGHT } from "./constants";
+import { DEFAULT_STYLE, LINE_HEIGHT } from "./constants";
 import { newId, newNonce, newSeed } from "./ids";
 import { linearPatch } from "./linear";
 import type {
   Binding,
+  EmbeddableElement,
+  FrameElement,
   FreedrawElement,
+  ImageCrop,
+  ImageElement,
   ItemStyle,
   LinearElement,
   Pt,
@@ -100,6 +104,30 @@ export function newText(x: number, y: number, style: ItemStyle, text = ""): Text
   };
 }
 
+export function newImage(x: number, y: number, width: number, height: number, fileId: string | null, crop: ImageCrop | null = null): ImageElement {
+  return {
+    ...base(x, y, DEFAULT_STYLE),
+    type: "image",
+    width,
+    height,
+    strokeColor: "transparent",
+    backgroundColor: "transparent",
+    roundness: false,
+    fileId,
+    status: fileId ? "saved" : "pending",
+    scale: [1, 1],
+    crop,
+  };
+}
+
+export function newFrame(x: number, y: number, width: number, height: number, name: string): FrameElement {
+  return { ...base(x, y, DEFAULT_STYLE), type: "frame", width, height, name, strokeColor: "#9ca3af", backgroundColor: "transparent", roughness: 0 };
+}
+
+export function newEmbeddable(x: number, y: number, width: number, height: number, link: string | null = null): EmbeddableElement {
+  return { ...base(x, y, DEFAULT_STYLE), type: "embeddable", width, height, link, backgroundColor: "transparent" };
+}
+
 /**
  * Copies with fresh ids, offset by (dx, dy). Group ids are remapped so copies stay grouped together, and
  * links between the copied elements (label to container, arrow to shape) point at the copies. Pass labels along
@@ -125,6 +153,8 @@ export function cloneElements(els: readonly SketchElement[], dx: number, dy: num
       version: 1,
       versionNonce: newNonce(),
       groupIds: el.groupIds.map(mapGroup),
+      // A copy of an element inside a copied frame goes into the copy; otherwise it stays in the frame it was in.
+      frameId: el.frameId && idMap.has(el.frameId) ? idMap.get(el.frameId)! : el.frameId,
       boundElements: links.length ? links : null,
       ...("points" in el ? { points: el.points.map((p): Pt => [p[0], p[1]]) } : {}),
       ...("pressures" in el ? { pressures: [...el.pressures] } : {}),

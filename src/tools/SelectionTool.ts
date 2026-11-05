@@ -1,10 +1,13 @@
+import { getImageEntry } from "../data/files";
 import { boundsContain, boxCenter, getCommonBounds, getElementBounds, isPointInBox, type Box } from "../geometry/bounds";
+import { cropAfterDrag } from "../geometry/crop";
 import { topElementAt } from "../geometry/hit";
 import { hitLinearHandle, insertPointPatch, linearHandles, movePointsPatch } from "../geometry/linearEdit";
 import { distance, snapAngle, type Point } from "../geometry/math";
 import { snapBoundsToTargets, snapToGrid } from "../geometry/snap";
 import {
   HANDLE_DIRS,
+  RESIZE_HANDLES,
   getSelectionFrame,
   handleAnchorPoint,
   hitHandle,
@@ -20,8 +23,10 @@ import { allowedHandles } from "../render/renderInteractive";
 import { findBindingTarget } from "../scene/binding";
 import { cloneElements } from "../scene/factory";
 import { groupAwareBoxSelection, isBoundText, resolveSelection, withBoundTexts } from "../scene/selection";
-import type { LinearElement, SketchElement } from "../scene/types";
+import { withFrameChildren } from "../scene/frames";
+import type { ImageElement, LinearElement, SketchElement } from "../scene/types";
 import { detachUnselectedArrows, exitLinearEdit, removeSelectedPoints, selectedElements, selectIds } from "../state/operations";
+import { exitCrop } from "../state/rich";
 import type { Store } from "../state/store";
 
 type Mode =
@@ -39,7 +44,8 @@ type Mode =
   | { kind: "resize"; handle: ResizeHandle; frame: Frame; originals: SketchElement[]; grab: Point; changed: boolean }
   | { kind: "rotate"; center: Point; startAngle: number; originals: SketchElement[]; changed: boolean }
   | { kind: "box"; origin: Point; base: string[]; additive: boolean }
-  | { kind: "point"; start: Point; original: LinearElement; indices: number[]; changed: boolean };
+  | { kind: "point"; start: Point; original: LinearElement; indices: number[]; changed: boolean }
+  | { kind: "crop"; handle: ResizeHandle; original: ImageElement; grab: Point; changed: boolean };
 
 const CURSORS: Record<HandleName, string> = {
   nw: "nwse-resize",
@@ -68,6 +74,13 @@ export class SelectionTool implements ToolHandler {
     return 8 / this.store.state.zoom;
   }
 
+  /** The image being cropped, when crop mode is on. */
+  private croppingImage(): ImageElement | null {
+    const id = this.store.state.croppingId;
+    const el = id ? this.store.scene.get(id) : undefined;
+    return el && el.type === "image" && !el.isDeleted ? el : null;
+  }
+
   private editingLine(): LinearElement | null {
     const id = this.store.state.editingLinearId;
     const el = id ? this.store.scene.get(id) : undefined;
@@ -84,12 +97,24 @@ export class SelectionTool implements ToolHandler {
       const h = hitHandle(frame, e.scene, this.store.state.zoom, allowedHandles(selected));
       if (h) return CURSORS[h];
     }
-    return topElementAt(this.store.scene.visible(), e.scene, this.tolerance()) ? "move" : "default";
+    return topElementAt(this.store.scene.visible(), e.scene, this.tolerance(), this.store.state.frameRendering) ? "move" : "default";
   }
 
   down(e: PointerInfo) {
     const store = this.store;
     const s = store.state;
+
+    const cropping = this.croppingImage();
+    if (cropping) {
+      const frame = getSelectionFrame([cropping]);
+      const h = frame ? hitHandle(frame, e.scene, s.zoom, RESIZE_HANDLES) : null;
+      if (frame && h) {
+        const anchor = handleAnchorPoint(frame, h as ResizeHandle);
+        this.mode = { kind: "crop", handle: h as ResizeHandle, original: cropping, grab: [e.scene[0] - anchor[0], e.scene[1] - anchor[1]], changed: false };
+        return;
+      }
+      exitCrop(store); // clicking away ends cropping, then acts as a normal click
+    }
 
     const line = this.editingLine();
     if (line) {
@@ -128,7 +153,7 @@ export class SelectionTool implements ToolHandler {
     }
 
     const deep = e.ctrlKey || e.metaKey;
-    const hit = topElementAt(store.scene.visible(), e.scene, this.tolerance());
+    const hit = topElementAt(store.scene.visible(), e.scene, this.tolerance(), s.frameRendering);
     if (hit) {
       const already = s.selectedIds.includes(hit.id);
       if (e.shiftKey) {
@@ -227,13 +252,17 @@ export class SelectionTool implements ToolHandler {
         if (distance(e.screen, m.startScreen) < 3) return;
         m.moved = true;
         if (e.altKey && !m.duplicated) {
-          // Alt-drag: leave the originals and drag copies (with their labels).
-          const copies = cloneElements(withBoundTexts(scene.visible(), m.originals), 0, 0);
+          // Alt-drag: leave the originals and drag copies (with their labels, and what is inside copied frames).
+          const copies = cloneElements(withBoundTexts(scene.visible(), withFrameChildren(scene.visible(), m.originals)), 0, 0);
           scene.batch(() => copies.forEach((c) => scene.add(c)));
           const movable = copies.filter((c) => !isBoundText(c));
-          store.select(movable.map((c) => c.id));
+          const copiedFrames = new Set(movable.filter((c) => c.type === "frame").map((c) => c.id));
+          store.select(movable.filter((c) => !(c.frameId && copiedFrames.has(c.frameId))).map((c) => c.id));
           m.originals = movable;
           m.duplicated = true;
+        } else {
+          // A frame carries everything inside it.
+          m.originals = withFrameChildren(scene.visible(), m.originals);
         }
         detachUnselectedArrows(store, m.originals);
       }
@@ -254,7 +283,10 @@ export class SelectionTool implements ToolHandler {
         const [sx, sy] = HANDLE_DIRS[m.handle];
         p = snapPointer(store, p, new Set(m.originals.map((o) => o.id)), ctrl, { x: sx !== 0, y: sy !== 0 });
       }
-      const patches = resizeSelection(m.originals, m.frame, m.handle, p, e.shiftKey);
+      // A picture keeps its proportions from a corner (Shift frees it); everything else frees with no key and locks with Shift.
+      const [hx, hy] = HANDLE_DIRS[m.handle];
+      const keepAspect = m.originals.length === 1 && m.originals[0].type === "image" && hx !== 0 && hy !== 0 ? !e.shiftKey : e.shiftKey;
+      const patches = resizeSelection(m.originals, m.frame, m.handle, p, keepAspect);
       scene.batch(() => patches.forEach(([id, patch]) => scene.update(id, patch)));
       m.changed = true;
     } else if (m.kind === "rotate") {
@@ -266,6 +298,12 @@ export class SelectionTool implements ToolHandler {
       }
       const patches = rotateSelection(m.originals, m.center, delta);
       scene.batch(() => patches.forEach(([id, patch]) => scene.update(id, patch)));
+      m.changed = true;
+    } else if (m.kind === "crop") {
+      const entry = getImageEntry(m.original.fileId);
+      if (!entry) return;
+      const p: Point = [e.scene[0] - m.grab[0], e.scene[1] - m.grab[1]];
+      scene.update(m.original.id, cropAfterDrag(m.original, m.handle, p, entry));
       m.changed = true;
     } else if (m.kind === "point") {
       const dx = e.scene[0] - m.start[0];
@@ -323,7 +361,7 @@ export class SelectionTool implements ToolHandler {
           selectIds(store, [m.hitId], false);
         }
       }
-    } else if (m.kind === "resize" || m.kind === "rotate" || m.kind === "point") {
+    } else if (m.kind === "resize" || m.kind === "rotate" || m.kind === "point" || m.kind === "crop") {
       if (m.changed) store.commit();
     } else {
       store.setState({ selectionBox: null });
@@ -331,6 +369,10 @@ export class SelectionTool implements ToolHandler {
   }
 
   keyDown(e: KeyboardEvent): boolean {
+    if (this.store.state.croppingId && (e.key === "Escape" || e.key === "Enter")) {
+      exitCrop(this.store);
+      return true;
+    }
     if (!this.store.state.editingLinearId) return false;
     if (e.key === "Escape" || e.key === "Enter") {
       exitLinearEdit(this.store);

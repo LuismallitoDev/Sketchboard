@@ -1,4 +1,5 @@
 import { History } from "../history/history";
+import { frameAssignments } from "../scene/frames";
 import { normalizeScene } from "../scene/normalize";
 import { Scene } from "../scene/scene";
 import { resolveSelection } from "../scene/selection";
@@ -58,8 +59,10 @@ export class Store {
     this.setState({ selectedIds: [...ids] });
   }
 
-  /** Records the changes since the last commit as one undo step. */
+  /** Records the changes since the last commit as one undo step (after putting moved elements into their frames). */
   commit(): boolean {
+    const assignments = frameAssignments(this.scene.visible(), this.history.previous);
+    if (assignments.length > 0) this.scene.batch(() => assignments.forEach(([id, frameId]) => this.scene.update(id, { frameId })));
     return this.history.commit();
   }
 

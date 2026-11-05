@@ -6,6 +6,8 @@ import "./styles.css";
 
 import { createRoot } from "react-dom/client";
 import { installAutosave, loadLocalScene } from "./data/autosave";
+import { getImageEntry, preloadImages } from "./data/files";
+import { insertImageFile } from "./state/rich";
 import { Store } from "./state/store";
 import { App } from "./ui/App";
 
@@ -21,7 +23,10 @@ async function boot() {
   await loadFonts();
   const saved = loadLocalScene();
   const store = new Store(saved?.appState);
-  if (saved) store.scene.setAll(saved.elements);
+  if (saved) {
+    store.scene.setAll(saved.elements);
+    preloadImages(saved.elements); // pictures load from the browser's file store; the canvas redraws as they arrive
+  }
   store.history.reset();
   installAutosave(store);
 
@@ -31,6 +36,8 @@ async function boot() {
       store,
       elements: () => store.scene.visible(),
       state: () => store.state,
+      insertImage: (blob: Blob) => insertImageFile(store, blob),
+      imageEntry: (id: string) => getImageEntry(id) ?? null,
     };
   }
 

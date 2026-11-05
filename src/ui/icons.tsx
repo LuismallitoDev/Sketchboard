@@ -50,7 +50,18 @@ export type IconName =
   | "grid"
   | "magnet"
   | "link"
-  | "midpoint";
+  | "midpoint"
+  | "frame"
+  | "sticky"
+  | "embed"
+  | "laser"
+  | "lasso"
+  | "autoshape"
+  | "bucket"
+  | "image"
+  | "more"
+  | "crop"
+  | "penMode";
 
 const PATHS: Record<IconName, ReactNode> = {
   hand: <path d="M8 13V6.5a1.5 1.5 0 013 0V12 M11 11.5V4.5a1.5 1.5 0 013 0V12 M14 12V6.5a1.5 1.5 0 013 0V14c0 4.5-2.4 7-6 7-3 0-4.6-1.6-6.2-4.4l-1.7-3a1.5 1.5 0 012.5-1.6L8 14" />,
@@ -135,6 +146,17 @@ const PATHS: Record<IconName, ReactNode> = {
   magnet: <path d="M6 4v8a6 6 0 0012 0V4 M6 4h4v8a2 2 0 004 0V4h4 M6 8h4 M14 8h4" />,
   link: <path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1 M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1" />,
   midpoint: <path d="M3 12h18 M12 5v14 M8 12a4 4 0 118 0 4 4 0 01-8 0" />,
+  frame: <path d="M7 3v18 M17 3v18 M3 7h18 M3 17h18" />,
+  sticky: <path d="M5 4h14v10l-5 6H5z M14 14v6 M14 14h5" />,
+  embed: <path d="M3 5h18v14H3z M3 9h18 M6.5 7h.01 M9.5 7h.01" />,
+  laser: <path d="M4 20l8-8 M13 11l-3-3 M16 3v3 M19 6h-3 M20 12l-2-1 M12 4l1 2" />,
+  lasso: <path d="M12 5C7.6 5 4 6.8 4 9s3.6 4 8 4c4.4 0 8-1.8 8-4s-3.6-4-8-4z M9 13c-1 2-.5 4.5 2 5 1.6.3 2.6-.4 3-1.5" />,
+  autoshape: <path d="M4 20L14 10 M14 3v3 M12.5 4.5h3 M19 9v3 M17.5 10.5h3 M5 11v2 M4 12h2" />,
+  bucket: <path d="M4 12l7-7 8 8-7 7z M4 12h16 M20 16c1 1.4 1 2.4 0 3-1-.6-1-1.6 0-3z" />,
+  image: <path d="M3 5h18v14H3z M3 16l5-5 4 4 3-3 6 6 M16 9.5h.01" />,
+  more: <path d="M6 12h.01 M12 12h.01 M18 12h.01" strokeWidth={3} />,
+  crop: <path d="M7 3v14h14 M3 7h14v14" />,
+  penMode: <path d="M4 20l1-4.2L16.6 4.2a2.2 2.2 0 013.2 3.2L8.2 19z M15 18l5 5 M20 18l-5 5" />,
 };
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {

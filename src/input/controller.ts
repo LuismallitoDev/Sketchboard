@@ -4,11 +4,14 @@ import { EraserTool } from "../tools/EraserTool";
 import { FreedrawTool } from "../tools/FreedrawTool";
 import { HandTool } from "../tools/HandTool";
 import { LinearTool } from "../tools/LinearTool";
+import { BucketTool, LaserTool, LassoTool } from "../tools/EffectTools";
 import { SelectionTool } from "../tools/SelectionTool";
 import { ShapeTool } from "../tools/ShapeTool";
+import { StickyTool } from "../tools/StickyTool";
 import { TextTool } from "../tools/TextTool";
 import type { ToolType } from "../state/appState";
 import { finishTextEdit, startBoundTextEdit, startLinearEdit, startTextEdit } from "../state/operations";
+import { activateEmbed, finishFrameRename, openEmbedDialog, startCrop, startFrameRename } from "../state/rich";
 import type { Store } from "../state/store";
 import type { PointerInfo, ToolHandler } from "./types";
 
@@ -35,6 +38,13 @@ export class InteractionController {
       freedraw: new FreedrawTool(store),
       text: new TextTool(store),
       eraser: new EraserTool(store),
+      frame: new ShapeTool(store, "frame"),
+      sticky: new StickyTool(store),
+      embed: new ShapeTool(store, "embeddable"),
+      laser: new LaserTool(store),
+      lasso: new LassoTool(store),
+      autoshape: new FreedrawTool(store, true),
+      bucket: new BucketTool(store),
     };
     this.lastTool = store.state.tool;
     this.updateCursor();
@@ -57,6 +67,9 @@ export class InteractionController {
   pointerDown(e: PointerInfo) {
     if (e.button !== 0 && e.button !== 1) return;
     if (this.store.state.editingTextId) finishTextEdit(this.store);
+    // A press on the canvas takes the mouse back from an interactive embed and ends renaming a frame.
+    if (this.store.state.activeEmbedId) activateEmbed(this.store, null);
+    if (this.store.state.editingFrameId) finishFrameRename(this.store);
     const panning = e.button === 1 || this.spaceDown;
     this.active = panning ? this.hand : this.tools[this.store.state.tool];
     this.active.down(e);
@@ -91,14 +104,17 @@ export class InteractionController {
     const store = this.store;
     if (store.state.tool !== "selection" || store.state.editingLinearId) return;
     const visible = store.scene.visible();
-    const hit = topElementAt(visible, e.scene, 6 / store.state.zoom);
+    const hit = topElementAt(visible, e.scene, 6 / store.state.zoom, store.state.frameRendering);
     if (hit) {
       if (hit.type === "text") startTextEdit(store, hit.id, false);
       else if (hit.type === "line") startLinearEdit(store, hit.id);
       else if (hit.type === "arrow") {
         if (e.ctrlKey || e.metaKey) startLinearEdit(store, hit.id);
         else startBoundTextEdit(store, hit);
-      } else if (hit.type !== "freedraw") startBoundTextEdit(store, hit);
+      } else if (hit.type === "frame") startFrameRename(store, hit.id);
+      else if (hit.type === "image") startCrop(store, hit.id);
+      else if (hit.type === "embeddable") openEmbedDialog(store, hit.id);
+      else if (hit.type !== "freedraw") startBoundTextEdit(store, hit);
       return;
     }
     const inside = topShapeContaining(visible, e.scene);

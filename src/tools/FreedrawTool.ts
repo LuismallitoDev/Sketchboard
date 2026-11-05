@@ -3,14 +3,21 @@ import type { PointerInfo, ToolHandler } from "../input/types";
 import { newFreedraw } from "../scene/factory";
 import { linearPatch } from "../scene/linear";
 import type { FreedrawElement, Pt } from "../scene/types";
+import { convertStrokeToShape } from "../state/rich";
 import type { Store } from "../state/store";
 
-/** Pen: records the pointer path. A stylus draws with real pressure; a mouse simulates it (or stays constant). */
+/**
+ * Pen: records the pointer path. A stylus draws with real pressure; a mouse simulates it (or stays constant).
+ * In "draw to shape" mode the finished stroke is replaced by the clean shape it was meant to be, when recognised.
+ */
 export class FreedrawTool implements ToolHandler {
   private id: string | null = null;
   private realPressure = false;
 
-  constructor(private store: Store) {}
+  constructor(
+    private store: Store,
+    private toShape = false,
+  ) {}
 
   private get el(): FreedrawElement | undefined {
     return this.id ? (this.store.scene.get(this.id) as FreedrawElement | undefined) : undefined;
@@ -39,8 +46,10 @@ export class FreedrawTool implements ToolHandler {
   }
 
   up() {
-    if (!this.id) return;
+    const id = this.id;
     this.id = null;
+    if (!id) return;
+    if (this.toShape) convertStrokeToShape(this.store, id);
     this.store.commit(); // the pen stays active, like a real pen
   }
 

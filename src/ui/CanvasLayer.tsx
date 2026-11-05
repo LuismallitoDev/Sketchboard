@@ -1,10 +1,14 @@
 import { useEffect, useRef } from "react";
+import { filesVersion, subscribeFiles } from "../data/files";
 import type { InteractionController } from "../input/controller";
 import type { PointerInfo } from "../input/types";
 import { renderInteractive } from "../render/renderInteractive";
 import { renderStatic } from "../render/renderStatic";
 import { cancelEyedropper, pickEyedropperColor, resolveTheme, setZoom } from "../state/operations";
 import { screenToScene } from "../state/viewport";
+import { insertImageFile } from "../state/rich";
+import { EmbedInteractButton, EmbedLayer } from "./EmbedLayer";
+import { FrameNameEditor } from "./FrameNameEditor";
 import { TextEditor } from "./TextEditor";
 import { useStore, useStoreVersion } from "./StoreContext";
 
@@ -66,7 +70,23 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
           resized = true;
         }
       }
-      const key = [els, s.offsetX, s.offsetY, s.zoom, s.width, s.height, s.viewBackgroundColor, s.editingTextId, s.erasingIds, s.gridMode, dpr];
+      const key = [
+        els,
+        s.offsetX,
+        s.offsetY,
+        s.zoom,
+        s.width,
+        s.height,
+        s.viewBackgroundColor,
+        s.editingTextId,
+        s.editingFrameId,
+        s.erasingIds,
+        s.gridMode,
+        s.frameRendering,
+        s.theme,
+        filesVersion(),
+        dpr,
+      ];
       if (resized || !lastStaticKey || key.some((v, i) => !Object.is(v, lastStaticKey![i]))) {
         renderStatic(st, s, els, dpr);
         lastStaticKey = key;
@@ -75,15 +95,25 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
       const selected = els.filter((e) => !e.isDeleted && ids.has(e.id));
       const highlight = s.bindingHighlight ? (store.scene.get(s.bindingHighlight) ?? null) : null;
       renderInteractive(it, s, selected, dpr, resolveTheme(s.theme) === "dark", highlight);
+
+      // The laser pointer's trail fades by itself: keep animating until it is gone.
+      if (s.laserTrail.length > 0) {
+        const now = performance.now();
+        const fresh = s.laserTrail.filter((p) => now - p.t < 900);
+        if (fresh.length !== s.laserTrail.length) store.setState({ laserTrail: fresh });
+        else request();
+      }
     };
 
-    const request = () => {
+    function request() {
       if (!raf) raf = requestAnimationFrame(draw);
-    };
+    }
     const unsubscribe = store.subscribe(request);
+    const unsubscribeFiles = subscribeFiles(request); // pictures finished loading
     request();
     return () => {
       unsubscribe();
+      unsubscribeFiles();
       cancelAnimationFrame(raf);
     };
   }, [store]);
@@ -140,15 +170,35 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
     };
   };
 
+  /** Pen mode: touch is ignored, so a resting palm cannot draw while a pen or mouse is used. */
+  const ignoredTouch = (e: { pointerType?: string }) => store.state.penMode && e.pointerType === "touch";
+
   return (
-    <div className="canvas-wrap" ref={wrapRef}>
+    <div
+      className="canvas-wrap"
+      ref={wrapRef}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        // Pictures dropped on the canvas land where they were dropped.
+        const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
+        if (files.length === 0) return;
+        e.preventDefault();
+        const rect = wrapRef.current!.getBoundingClientRect();
+        const at = screenToScene(store.state, e.clientX - rect.left, e.clientY - rect.top);
+        files.forEach((f, i) => void insertImageFile(store, f, [at[0] + i * 24, at[1] + i * 24]));
+      }}
+    >
       <canvas ref={staticRef} className="static-canvas" />
+      <EmbedLayer />
       <canvas
         ref={interactiveRef}
         className="interactive-canvas"
         style={{ cursor: store.state.cursor }}
         data-testid="canvas"
         onPointerDown={(e) => {
+          if (ignoredTouch(e)) return;
           const dropper = store.state.eyedropper;
           if (dropper) {
             // Colour picking takes over the pointer: a click applies the colour under it.
@@ -163,6 +213,7 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
           controller.pointerDown(info(e));
         }}
         onPointerMove={(e) => {
+          if (ignoredTouch(e)) return;
           const dropper = store.state.eyedropper;
           if (dropper) {
             const i = info(e);
@@ -172,6 +223,7 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
           controller.pointerMove(info(e));
         }}
         onPointerUp={(e) => {
+          if (ignoredTouch(e)) return;
           if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
           controller.pointerUp(info(e));
         }}
@@ -181,6 +233,8 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
       />
       <div className="dom-layer">
         <TextEditor />
+        <FrameNameEditor />
+        <EmbedInteractButton />
         {store.state.eyedropper?.color && (
           <div className="eyedropper-chip" data-testid="eyedropper-chip" style={{ left: store.state.eyedropper.x + 18, top: store.state.eyedropper.y + 18 }}>
             <span style={{ background: store.state.eyedropper.color }} />

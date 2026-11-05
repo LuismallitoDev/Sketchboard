@@ -1,8 +1,17 @@
+import { getImageEntry } from "../data/files";
 import { boundsOverlap, getElementBounds, getLocalBox, type Bounds } from "../geometry/bounds";
 import { GRID_SIZE } from "../geometry/snap";
-import type { SketchElement } from "../scene/types";
+import { parseEmbedUrl } from "../embed/embed";
+import type { EmbeddableElement, FrameElement, ImageElement, SketchElement } from "../scene/types";
 import type { AppState } from "../state/appState";
+import { resolveTheme } from "../state/operations";
 import { drawElement, getRenderPad } from "./elementCanvas";
+
+/**
+ * The page's dark mode inverts the whole scene canvas with a CSS filter. Pictures are drawn with the opposite
+ * filter first so they keep their own colours.
+ */
+export const IMAGE_COUNTER_FILTER = "invert(100%) hue-rotate(180deg) saturate(1.25)";
 
 /** Paints the scene (background + every visible element) onto the static canvas. */
 export function renderStatic(canvas: HTMLCanvasElement, state: AppState, elements: readonly SketchElement[], dpr: number) {
@@ -22,21 +31,41 @@ export function renderStatic(canvas: HTMLCanvasElement, state: AppState, element
     (state.height - state.offsetY) / state.zoom,
   ];
   const erasing = state.erasingIds.length ? new Set(state.erasingIds) : null;
+  const dark = resolveTheme(state.theme) === "dark";
   let byId: Map<string, SketchElement> | null = null;
+  const lookup = () => (byId ??= new Map(elements.map((e) => [e.id, e])));
 
   for (const el of elements) {
     if (el.isDeleted) continue;
     const b = getElementBounds(el);
-    const pad = getRenderPad(el);
+    const pad = getRenderPad(el) + (el.type === "frame" ? 30 : 0); // a frame's name sits above it
     if (!boundsOverlap([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad], view)) continue;
     const alpha = erasing?.has(el.id) ? 0.2 : 1;
+
+    if (el.type === "frame") {
+      drawFrame(ctx, el, state, alpha);
+      continue;
+    }
     if (el.type === "text" && el.containerId) {
       // An arrow's label gets a canvas-coloured backing so the line does not run through the letters.
-      byId ??= new Map(elements.map((e) => [e.id, e]));
-      if (byId.get(el.containerId)?.type === "arrow" && el.text !== "") drawLabelBacking(ctx, el, state, alpha);
+      if (lookup().get(el.containerId)?.type === "arrow" && el.text !== "") drawLabelBacking(ctx, el, state, alpha);
     }
     if (el.id === state.editingTextId) continue;
-    drawElement(ctx, el, state, dpr, alpha);
+
+    // Elements in a frame are clipped to it.
+    const frame = state.frameRendering && el.frameId ? lookup().get(el.frameId) : undefined;
+    const clip = frame && frame.type === "frame" && !frame.isDeleted ? frame : null;
+    if (clip) {
+      const fb = getLocalBox(clip);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(fb.x * state.zoom + state.offsetX, fb.y * state.zoom + state.offsetY, fb.width * state.zoom, fb.height * state.zoom);
+      ctx.clip();
+    }
+    if (el.type === "image") drawImageElement(ctx, el, state, dark, alpha);
+    else if (el.type === "embeddable") drawEmbedPlaceholder(ctx, el, state, alpha);
+    else drawElement(ctx, el, state, dpr, alpha);
+    if (clip) ctx.restore();
   }
 }
 
@@ -85,5 +114,88 @@ function drawLabelBacking(ctx: CanvasRenderingContext2D, el: SketchElement, stat
     box.width * state.zoom + pad * 2,
     box.height * state.zoom + pad * 2,
   );
+  ctx.restore();
+}
+
+/** A frame: a thin rounded outline with its name above the top-left corner. Nothing when frame rendering is off. */
+function drawFrame(ctx: CanvasRenderingContext2D, el: FrameElement, state: AppState, alpha: number) {
+  if (!state.frameRendering) return;
+  const box = getLocalBox(el);
+  const z = state.zoom;
+  const x = box.x * z + state.offsetX;
+  const y = box.y * z + state.offsetY;
+  const w = box.width * z;
+  const h = box.height * z;
+  ctx.save();
+  ctx.globalAlpha = alpha * (el.opacity / 100);
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 6);
+  ctx.stroke();
+  if (state.editingFrameId !== el.id) {
+    ctx.font = '600 12px "Nunito", system-ui, sans-serif';
+    ctx.fillStyle = el.strokeColor;
+    ctx.textBaseline = "bottom";
+    let text = el.name ?? "Frame";
+    while (text.length > 1 && ctx.measureText(text).width > w) text = text.slice(0, -2) + "…";
+    ctx.fillText(text, x, y - 6, Math.max(w, 1));
+  }
+  ctx.restore();
+}
+
+function drawImageElement(ctx: CanvasRenderingContext2D, el: ImageElement, state: AppState, dark: boolean, alpha: number) {
+  const box = getLocalBox(el);
+  const z = state.zoom;
+  const w = box.width * z;
+  const h = box.height * z;
+  const entry = getImageEntry(el.fileId);
+  ctx.save();
+  ctx.globalAlpha = alpha * (el.opacity / 100);
+  ctx.translate((box.x + box.width / 2) * z + state.offsetX, (box.y + box.height / 2) * z + state.offsetY);
+  if (el.angle) ctx.rotate(el.angle);
+  if (entry) {
+    ctx.scale(el.scale[0], el.scale[1]);
+    if (dark) ctx.filter = IMAGE_COUNTER_FILTER;
+    const c = el.crop;
+    ctx.drawImage(entry.image, c?.x ?? 0, c?.y ?? 0, c?.width ?? entry.width, c?.height ?? entry.height, -w / 2, -h / 2, w, h);
+  } else {
+    ctx.fillStyle = "#e5e7eb";
+    ctx.strokeStyle = "#9ca3af";
+    ctx.lineWidth = 1;
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.strokeRect(-w / 2, -h / 2, w, h);
+    ctx.fillStyle = "#6b7280";
+    ctx.font = '600 13px "Nunito", system-ui, sans-serif';
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(el.status === "pending" || el.fileId ? "Loading image…" : "Image unavailable", 0, 0, Math.max(w - 8, 1));
+  }
+  ctx.restore();
+}
+
+/** What shows on the canvas (and in exports) for an embed; the live page is an iframe drawn over it. */
+function drawEmbedPlaceholder(ctx: CanvasRenderingContext2D, el: EmbeddableElement, state: AppState, alpha: number) {
+  const box = getLocalBox(el);
+  const z = state.zoom;
+  const x = box.x * z + state.offsetX;
+  const y = box.y * z + state.offsetY;
+  const w = box.width * z;
+  const h = box.height * z;
+  const info = el.link ? parseEmbedUrl(el.link) : null;
+  ctx.save();
+  ctx.globalAlpha = alpha * (el.opacity / 100);
+  ctx.fillStyle = "#f3f4f6";
+  ctx.strokeStyle = "#d1d5db";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 8);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#4b5563";
+  ctx.font = '700 14px "Nunito", system-ui, sans-serif';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(info ? info.label : "Embed", x + w / 2, y + h / 2, Math.max(w - 12, 1));
   ctx.restore();
 }
