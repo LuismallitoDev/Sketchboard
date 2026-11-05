@@ -1,0 +1,105 @@
+import { boxCenter, getLocalBox } from "../geometry/bounds";
+import {
+  CORNER_HANDLES,
+  HANDLE_PAD,
+  RESIZE_HANDLES,
+  getSelectionFrame,
+  handlePositions,
+  type HandleName,
+} from "../geometry/transform";
+import type { SketchElement } from "../scene/types";
+import type { AppState } from "../state/appState";
+import { sceneToScreen } from "../state/viewport";
+
+export const ACCENT_LIGHT = "#0d9488";
+export const ACCENT_DARK = "#2dd4bf";
+
+/** Which handles a selection offers (text only scales from its corners). */
+export function allowedHandles(selected: readonly SketchElement[]): HandleName[] {
+  if (selected.length === 1 && selected[0].locked) return [];
+  const cornersOnly = selected.some((e) => e.type === "text");
+  return cornersOnly ? ["rotate", ...CORNER_HANDLES] : ["rotate", ...RESIZE_HANDLES];
+}
+
+/** Selection outlines, resize/rotate handles and the rubber-band box on the transparent overlay canvas. */
+export function renderInteractive(
+  canvas: HTMLCanvasElement,
+  state: AppState,
+  selected: readonly SketchElement[],
+  dpr: number,
+  dark: boolean,
+) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const accent = dark ? ACCENT_DARK : ACCENT_LIGHT;
+  const z = state.zoom;
+
+  if (state.selectionBox) {
+    const [x, y] = sceneToScreen(state, state.selectionBox.x, state.selectionBox.y);
+    ctx.fillStyle = dark ? "rgba(45,212,191,0.12)" : "rgba(13,148,136,0.1)";
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1;
+    ctx.fillRect(x, y, state.selectionBox.width * z, state.selectionBox.height * z);
+    ctx.strokeRect(x + 0.5, y + 0.5, state.selectionBox.width * z, state.selectionBox.height * z);
+  }
+
+  if (selected.length === 0 || state.editingTextId) return;
+
+  // Outline every selected element when several are selected.
+  if (selected.length > 1) {
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1;
+    for (const el of selected) strokeRotatedBox(ctx, state, getLocalBox(el), el.angle, 3);
+  }
+
+  const frame = getSelectionFrame(selected);
+  if (!frame) return;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash(selected.length > 1 ? [6, 4] : []);
+  strokeRotatedBox(ctx, state, frame.box, frame.angle, HANDLE_PAD);
+  ctx.setLineDash([]);
+
+  const allowed = allowedHandles(selected);
+  if (allowed.length === 0) return;
+  const pos = handlePositions(frame, z);
+  ctx.fillStyle = dark ? "#1f2937" : "#ffffff";
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.5;
+  for (const name of allowed) {
+    const [sx, sy] = sceneToScreen(state, pos[name][0], pos[name][1]);
+    ctx.save();
+    ctx.translate(sx, sy);
+    if (name === "rotate") {
+      ctx.beginPath();
+      ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    } else {
+      ctx.rotate(frame.angle);
+      ctx.beginPath();
+      ctx.roundRect(-4.5, -4.5, 9, 9, 2);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function strokeRotatedBox(
+  ctx: CanvasRenderingContext2D,
+  view: Pick<AppState, "zoom" | "offsetX" | "offsetY">,
+  box: { x: number; y: number; width: number; height: number },
+  angle: number,
+  padPx: number,
+) {
+  const [cx, cy] = sceneToScreen(view, boxCenter(box)[0], boxCenter(box)[1]);
+  const w = box.width * view.zoom + padPx * 2;
+  const h = box.height * view.zoom + padPx * 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.strokeRect(-w / 2, -h / 2, w, h);
+  ctx.restore();
+}
