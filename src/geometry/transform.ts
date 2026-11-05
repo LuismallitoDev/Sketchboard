@@ -3,7 +3,7 @@ import { linearPatchFromAbs, pointsBBox } from "../scene/linear";
 import { isPointsElement, type Pt, type SketchElement } from "../scene/types";
 import { boundsToBox, boxCenter, getCommonBounds, getLocalBox, type Box } from "./bounds";
 import { distance, normalizeAngle, rotatePoint, type Point } from "./math";
-import { measureText } from "./text";
+import { layoutText, measureText } from "./text";
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 export type HandleName = ResizeHandle | "rotate";
@@ -86,10 +86,13 @@ export function resizeElementToBox(el: SketchElement, nb: Box): Partial<SketchEl
   if (el.type === "text") {
     const s = b0.height > 0 ? nb.height / b0.height : 1;
     const fontSize = Math.max(8, Math.round(el.fontSize * s));
-    const m = measureText(el.text, fontSize, el.fontFamily, el.lineHeight);
+    // A fixed-width text keeps its proportions: the wrap width scales along with the font.
+    const wrapWidth = el.wrapWidth === null ? null : Math.max(fontSize, el.wrapWidth * (fontSize / el.fontSize));
+    const m = layoutText(el.text, fontSize, el.fontFamily, el.lineHeight, wrapWidth);
+    const width = wrapWidth ?? m.width;
     const cx = nb.x + nb.width / 2;
     const cy = nb.y + nb.height / 2;
-    return { fontSize, width: m.width, height: m.height, x: cx - m.width / 2, y: cy - m.height / 2 };
+    return { fontSize, wrapWidth, width, height: m.height, x: cx - width / 2, y: cy - m.height / 2 };
   }
   if (isPointsElement(el)) {
     const kx = b0.width > 0 ? nb.width / b0.width : 1;
@@ -128,8 +131,14 @@ export function resizeSelection(
   let nw = sx === 0 ? box.width : Math.max(MIN_SIZE, sx * dx);
   let nh = sy === 0 ? box.height : Math.max(MIN_SIZE, sy * dy);
 
+  // Dragging a side handle of a single text changes its wrap width instead of scaling the font.
+  const single = originals.length === 1 ? originals[0] : null;
+  const textSide = single?.type === "text" && sy === 0;
+  if (textSide) nw = Math.max(nw, single.fontSize);
+
   const uniform =
-    keepAspect || originals.some((e) => e.type === "text") || (originals.length > 1 && originals.some((e) => e.angle !== 0));
+    !textSide &&
+    (keepAspect || originals.some((e) => e.type === "text") || (originals.length > 1 && originals.some((e) => e.angle !== 0)));
   if (uniform) {
     const kx = box.width > 0 ? nw / box.width : 1;
     const ky = box.height > 0 ? nh / box.height : 1;
@@ -141,6 +150,10 @@ export function resizeSelection(
   const newCenter = rotatePoint([anchor[0] + (0.5 - ax) * nw, anchor[1] + (0.5 - ay) * nh], anchor, angle);
   const newBox: Box = { x: newCenter[0] - nw / 2, y: newCenter[1] - nh / 2, width: nw, height: nh };
 
+  if (single?.type === "text" && textSide) {
+    const m = layoutText(single.text, single.fontSize, single.fontFamily, single.lineHeight, newBox.width);
+    return [[single.id, { x: newBox.x, y: newBox.y, width: newBox.width, height: m.height, wrapWidth: newBox.width, autoResize: false }]];
+  }
   if (originals.length === 1) return [[originals[0].id, resizeElementToBox(originals[0], newBox)]];
 
   // Group: map each element's box through the group-box change (the group frame is unrotated).

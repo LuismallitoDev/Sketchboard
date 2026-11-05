@@ -1,13 +1,37 @@
 import { t, type StringKey } from "../i18n";
+import type { AlignKind } from "../scene/align";
+import { canGroup, canUngroup } from "../scene/groups";
+import type { ZMove } from "../scene/zindex";
 import type { ToolType } from "../state/appState";
 import {
+  alignSelected,
+  bindSelectedText,
+  canBindText,
+  cancelEyedropper,
+  copyStyle,
   deleteSelected,
+  distributeSelected,
   duplicateSelected,
+  editSelected,
+  flipSelected,
+  groupSelected,
+  hasBoundText,
+  lockedCount,
+  lockSelected,
+  moveSelectedZ,
+  pasteStyle,
+  requestClearCanvas,
   resetZoom,
   selectAll,
   selectedElements,
   setTool,
+  startEyedropper,
   toggleTheme,
+  togglePolygonSelected,
+  ungroupSelected,
+  unbindSelectedText,
+  unlockAll,
+  wrapSelectedTextInContainer,
   zoomBy,
   zoomToFit,
 } from "../state/operations";
@@ -54,6 +78,41 @@ const toolActions: Action[] = TOOL_DEFS.map((d) => ({
 }));
 
 const hasSelection = (s: Store) => s.state.selectedIds.length > 0;
+const selCount = (s: Store) => selectedElements(s).length;
+
+const Z_ACTIONS: { name: string; move: ZMove; label: StringKey; code: string; shift: boolean; shortcut: string }[] = [
+  { name: "bringForward", move: "forward", label: "action.bringForward", code: "BracketRight", shift: false, shortcut: `${MOD_LABEL}]` },
+  { name: "sendBackward", move: "backward", label: "action.sendBackward", code: "BracketLeft", shift: false, shortcut: `${MOD_LABEL}[` },
+  { name: "bringToFront", move: "front", label: "action.bringToFront", code: "BracketRight", shift: true, shortcut: `${MOD_LABEL}Shift+]` },
+  { name: "sendToBack", move: "back", label: "action.sendToBack", code: "BracketLeft", shift: true, shortcut: `${MOD_LABEL}Shift+[` },
+];
+
+const zActions: Action[] = Z_ACTIONS.map((z) => ({
+  name: z.name,
+  label: t(z.label),
+  shortcut: z.shortcut,
+  keyTest: (e) => mod(e) && !e.altKey && e.shiftKey === z.shift && e.code === z.code,
+  enabled: hasSelection,
+  perform: (s) => moveSelectedZ(s, z.move),
+}));
+
+const ALIGN_ACTIONS: { kind: AlignKind; label: StringKey; code?: string; shortcut?: string }[] = [
+  { kind: "left", label: "action.alignLeft", code: "ArrowLeft", shortcut: `${MOD_LABEL}Shift+←` },
+  { kind: "right", label: "action.alignRight", code: "ArrowRight", shortcut: `${MOD_LABEL}Shift+→` },
+  { kind: "top", label: "action.alignTop", code: "ArrowUp", shortcut: `${MOD_LABEL}Shift+↑` },
+  { kind: "bottom", label: "action.alignBottom", code: "ArrowDown", shortcut: `${MOD_LABEL}Shift+↓` },
+  { kind: "centerH", label: "action.alignCenterH" },
+  { kind: "centerV", label: "action.alignCenterV" },
+];
+
+const alignActions: Action[] = ALIGN_ACTIONS.map((a) => ({
+  name: `align:${a.kind}`,
+  label: t(a.label),
+  shortcut: a.shortcut,
+  keyTest: a.code ? (e) => mod(e) && e.shiftKey && !e.altKey && e.code === a.code : undefined,
+  enabled: (s) => selCount(s) >= 2,
+  perform: (s) => alignSelected(s, a.kind),
+}));
 
 export const actions: Action[] = [
   ...toolActions,
@@ -92,7 +151,7 @@ export const actions: Action[] = [
     name: "duplicate",
     label: t("action.duplicate"),
     shortcut: `${MOD_LABEL}D`,
-    keyTest: (e) => mod(e) && !e.shiftKey && e.key.toLowerCase() === "d",
+    keyTest: (e) => mod(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d",
     enabled: hasSelection,
     perform: duplicateSelected,
   },
@@ -109,9 +168,158 @@ export const actions: Action[] = [
     shortcut: "Esc",
     keyTest: (e) => e.key === "Escape",
     perform: (s) => {
-      if (hasSelection(s)) s.select([]);
+      if (s.state.eyedropper) cancelEyedropper(s);
+      else if (hasSelection(s)) s.select([]);
       else if (s.state.tool !== "selection") setTool(s, "selection");
     },
+  },
+
+  // groups and layers
+  {
+    name: "group",
+    label: t("action.group"),
+    shortcut: `${MOD_LABEL}G`,
+    keyTest: (e) => mod(e) && !e.shiftKey && e.key.toLowerCase() === "g",
+    enabled: (s) => canGroup(selectedElements(s)),
+    perform: groupSelected,
+  },
+  {
+    name: "ungroup",
+    label: t("action.ungroup"),
+    shortcut: `${MOD_LABEL}Shift+G`,
+    keyTest: (e) => mod(e) && e.shiftKey && e.key.toLowerCase() === "g",
+    enabled: (s) => canUngroup(selectedElements(s)),
+    perform: ungroupSelected,
+  },
+  ...zActions,
+
+  // arrange
+  ...alignActions,
+  {
+    name: "distribute:h",
+    label: t("action.distributeH"),
+    shortcut: "Alt+H",
+    keyTest: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyH",
+    enabled: (s) => selCount(s) >= 3,
+    perform: (s) => distributeSelected(s, "h"),
+  },
+  {
+    name: "distribute:v",
+    label: t("action.distributeV"),
+    shortcut: "Alt+V",
+    keyTest: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyV",
+    enabled: (s) => selCount(s) >= 3,
+    perform: (s) => distributeSelected(s, "v"),
+  },
+  {
+    name: "flip:h",
+    label: t("action.flipH"),
+    shortcut: "Shift+H",
+    keyTest: (e) => e.shiftKey && !mod(e) && !e.altKey && e.code === "KeyH",
+    enabled: hasSelection,
+    perform: (s) => flipSelected(s, "h"),
+  },
+  {
+    name: "flip:v",
+    label: t("action.flipV"),
+    shortcut: "Shift+V",
+    keyTest: (e) => e.shiftKey && !mod(e) && !e.altKey && e.code === "KeyV",
+    enabled: hasSelection,
+    perform: (s) => flipSelected(s, "v"),
+  },
+  {
+    name: "lock",
+    label: t("action.lock"),
+    shortcut: `${MOD_LABEL}Shift+L`,
+    keyTest: (e) => mod(e) && e.shiftKey && !e.altKey && e.code === "KeyL",
+    enabled: hasSelection,
+    perform: lockSelected,
+  },
+  {
+    name: "unlockAll",
+    label: t("action.unlockAll"),
+    shortcut: `${MOD_LABEL}Alt+Shift+L`,
+    keyTest: (e) => mod(e) && e.shiftKey && e.altKey && e.code === "KeyL",
+    enabled: (s) => lockedCount(s) > 0,
+    perform: unlockAll,
+  },
+
+  // style
+  {
+    name: "copyStyle",
+    label: t("action.copyStyle"),
+    shortcut: `${MOD_LABEL}Alt+C`,
+    keyTest: (e) => mod(e) && e.altKey && !e.shiftKey && e.code === "KeyC",
+    enabled: hasSelection,
+    perform: copyStyle,
+  },
+  {
+    name: "pasteStyle",
+    label: t("action.pasteStyle"),
+    shortcut: `${MOD_LABEL}Alt+V`,
+    keyTest: (e) => mod(e) && e.altKey && !e.shiftKey && e.code === "KeyV",
+    enabled: (s) => s.state.copiedStyle !== null && hasSelection(s),
+    perform: pasteStyle,
+  },
+  {
+    name: "eyedropper",
+    label: t("action.eyedropper"),
+    shortcut: "I",
+    keyTest: (e) => plain(e) && e.key.toLowerCase() === "i",
+    perform: (s) => startEyedropper(s, "stroke"),
+  },
+
+  // text and lines
+  {
+    name: "editSelected",
+    label: t("action.editSelected"),
+    shortcut: "Enter",
+    keyTest: (e) => e.key === "Enter" && !mod(e) && !e.shiftKey && !e.altKey,
+    enabled: (s) => selCount(s) === 1,
+    perform: (s) => void editSelected(s, false),
+  },
+  {
+    name: "editPoints",
+    label: t("action.editPoints"),
+    shortcut: `${MOD_LABEL}Enter`,
+    keyTest: (e) => e.key === "Enter" && mod(e) && !e.shiftKey && !e.altKey,
+    enabled: (s) => selectedElements(s).length === 1 && ["line", "arrow"].includes(selectedElements(s)[0].type),
+    perform: (s) => void editSelected(s, true),
+  },
+  {
+    name: "wrapTextInContainer",
+    label: t("action.wrapText"),
+    shortcut: `${MOD_LABEL}Shift+Enter`,
+    keyTest: (e) => mod(e) && e.shiftKey && e.key === "Enter",
+    enabled: (s) => selectedElements(s).some((e) => e.type === "text" && !e.containerId),
+    perform: wrapSelectedTextInContainer,
+  },
+  {
+    name: "bindText",
+    label: t("action.bindText"),
+    enabled: (s) => canBindText(selectedElements(s), s.scene.visible()),
+    perform: bindSelectedText,
+  },
+  {
+    name: "unbindText",
+    label: t("action.unbindText"),
+    enabled: (s) => hasBoundText(s, selectedElements(s)),
+    perform: unbindSelectedText,
+  },
+  {
+    name: "togglePolygon",
+    label: t("action.togglePolygon"),
+    enabled: (s) => selectedElements(s).some((e) => e.type === "line"),
+    perform: togglePolygonSelected,
+  },
+
+  // canvas
+  {
+    name: "clearCanvas",
+    label: t("action.clearCanvas"),
+    shortcut: `${MOD_LABEL}Delete`,
+    keyTest: (e) => mod(e) && e.key === "Delete",
+    perform: requestClearCanvas,
   },
   {
     name: "zoomIn",
@@ -159,3 +367,9 @@ export const actions: Action[] = [
 ];
 
 export const actionByName = (name: string): Action | undefined => actions.find((a) => a.name === name);
+
+/** Runs a registered action by name if it is currently enabled. */
+export function runAction(store: Store, name: string) {
+  const a = actionByName(name);
+  if (a && (a.enabled?.(store) ?? true)) a.perform(store);
+}

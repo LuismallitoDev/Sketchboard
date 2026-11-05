@@ -1,8 +1,15 @@
-import { isPointsElement, type SketchElement } from "../scene/types";
+import { isPointsElement, type LinearElement, type SketchElement } from "../scene/types";
 import { boxCenter, getLocalBox, isPointInBox } from "./bounds";
+import { sampleCurve } from "./curve";
 import { distanceToPolyline, distanceToSegment, pointInPolygon, rotatePoint, type Point } from "./math";
 
 export const isFilled = (el: SketchElement): boolean => el.backgroundColor !== "transparent";
+
+/** The visible path of a line or arrow in scene coordinates (unrotated), following curves. */
+export function linearPath(el: LinearElement): Point[] {
+  const abs = el.points.map((p): Point => [el.x + p[0], el.y + p[1]]);
+  return el.arrowType === "round" && abs.length >= 3 && !el.polygon ? sampleCurve(abs) : abs;
+}
 
 /** Does `scenePoint` hit the element? `tolerance` is in scene units (usually ~8 screen px / zoom). */
 export function hitElement(el: SketchElement, scenePoint: Point, tolerance: number): boolean {
@@ -40,24 +47,63 @@ export function hitElement(el: SketchElement, scenePoint: Point, tolerance: numb
       return isFilled(el) ? approxDist <= tol : Math.abs(approxDist) <= tol;
     }
     case "line":
-    case "arrow":
+    case "arrow": {
+      const path = linearPath(el);
+      if (el.polygon && isFilled(el) && pointInPolygon(p, path)) return true;
+      return distanceToPolyline(p, path) <= tol;
+    }
     case "freedraw": {
       if (!isPointsElement(el)) return false;
       const abs = el.points.map((pt): Point => [el.x + pt[0], el.y + pt[1]]);
-      const extra = el.type === "freedraw" ? el.strokeWidth * 1.5 : 0;
-      return distanceToPolyline(p, abs) <= tol + extra;
+      return distanceToPolyline(p, abs) <= tol + el.strokeWidth * 1.5;
     }
     case "text":
       return isPointInBox(p, box, tol);
   }
 }
 
-/** The topmost hittable element at the point (locked and deleted elements are skipped). */
+/** True when the point is inside the closed outline of a rectangle, diamond or ellipse, whether or not it is filled. */
+export function isInsideShape(el: SketchElement, scenePoint: Point): boolean {
+  if (el.type !== "rectangle" && el.type !== "diamond" && el.type !== "ellipse") return false;
+  const box = getLocalBox(el);
+  const p = rotatePoint(scenePoint, boxCenter(box), -el.angle);
+  if (el.type === "rectangle") return isPointInBox(p, box);
+  if (el.type === "ellipse") {
+    const a = box.width / 2;
+    const b = box.height / 2;
+    return a > 0 && b > 0 && Math.hypot((p[0] - box.x - a) / a, (p[1] - box.y - b) / b) <= 1;
+  }
+  return pointInPolygon(p, [
+    [box.x + box.width / 2, box.y],
+    [box.x + box.width, box.y + box.height / 2],
+    [box.x + box.width / 2, box.y + box.height],
+    [box.x, box.y + box.height / 2],
+  ]);
+}
+
+/**
+ * The topmost hittable element at the point (locked and deleted elements are skipped). A label counts as part of
+ * its container, so hitting the text returns the container.
+ */
 export function topElementAt(elements: readonly SketchElement[], p: Point, tolerance: number): SketchElement | null {
   for (let i = elements.length - 1; i >= 0; i--) {
     const el = elements[i];
     if (el.isDeleted || el.locked) continue;
-    if (hitElement(el, p, tolerance)) return el;
+    if (!hitElement(el, p, tolerance)) continue;
+    if (el.type === "text" && el.containerId) {
+      const container = elements.find((e) => e.id === el.containerId && !e.isDeleted);
+      if (container) return container.locked ? null : container;
+    }
+    return el;
+  }
+  return null;
+}
+
+/** The topmost shape whose inside contains the point (for double-clicking into an empty rectangle to add a label). */
+export function topShapeContaining(elements: readonly SketchElement[], p: Point): SketchElement | null {
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+    if (!el.isDeleted && !el.locked && isInsideShape(el, p)) return el;
   }
   return null;
 }

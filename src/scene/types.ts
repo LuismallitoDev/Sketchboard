@@ -4,8 +4,22 @@ export type Pt = [number, number];
 export type ElementType = "rectangle" | "diamond" | "ellipse" | "line" | "arrow" | "freedraw" | "text";
 export type FillStyle = "hachure" | "cross-hatch" | "solid" | "zigzag";
 export type StrokeStyle = "solid" | "dashed" | "dotted";
-/** Extended in phase 2 (bar, triangle, circle, diamond, crow's foot...). */
-export type Arrowhead = "arrow";
+export type Arrowhead =
+  | "arrow"
+  | "bar"
+  | "circle"
+  | "circle_outline"
+  | "triangle"
+  | "triangle_outline"
+  | "diamond"
+  | "diamond_outline"
+  // Entity-relationship notation: crow's foot and cardinality markers.
+  | "crowfoot_many"
+  | "crowfoot_one"
+  | "crowfoot_one_or_many"
+  | "cardinality_exactly_one"
+  | "cardinality_zero_or_one"
+  | "cardinality_zero_or_many";
 export type ArrowType = "sharp" | "round" | "elbow";
 export type FontFamily = "hand" | "normal" | "code";
 export type TextAlign = "left" | "center" | "right";
@@ -65,7 +79,10 @@ export interface LinearElement extends ElementBase {
   points: Pt[];
   startArrowhead: Arrowhead | null;
   endArrowhead: Arrowhead | null;
+  /** "round" draws a smooth curve through the points (for lines as well as arrows). */
   arrowType: ArrowType;
+  /** A closed line (last point equals the first); it can be filled. */
+  polygon: boolean;
   startBinding: Binding | null;
   endBinding: Binding | null;
 }
@@ -84,9 +101,13 @@ export interface TextElement extends ElementBase {
   fontFamily: FontFamily;
   textAlign: TextAlign;
   verticalAlign: VerticalAlign;
+  /** The shape or arrow this text is a label of. Its position and size follow the container. */
   containerId: string | null;
   lineHeight: number;
+  /** True: the box fits the text. False: the text wraps at `wrapWidth`. */
   autoResize: boolean;
+  /** Width the text wraps at (null = no wrapping). */
+  wrapWidth: number | null;
 }
 
 export type SketchElement = ShapeElement | LinearElement | FreedrawElement | TextElement;
@@ -108,6 +129,8 @@ export interface ItemStyle {
   startArrowhead: Arrowhead | null;
   endArrowhead: Arrowhead | null;
   arrowType: ArrowType;
+  /** New lines are drawn as smooth curves. */
+  lineCurved: boolean;
   /** Freedraw: true = variable pressure (simulated for a mouse), false = constant width. */
   simulatePressure: boolean;
 }

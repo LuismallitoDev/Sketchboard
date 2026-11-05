@@ -1,3 +1,4 @@
+import { bowPoint } from "../geometry/curve";
 import { distance, snapAngle, type Point } from "../geometry/math";
 import type { PointerInfo, ToolHandler } from "../input/types";
 import { newLinear } from "../scene/factory";
@@ -50,8 +51,17 @@ export class LinearTool implements ToolHandler {
     const el = this.el;
     if (this.multi && el) {
       const fixedLast = this.abs(el, el.points.length - 2);
+      const zoom = this.store.state.zoom;
+      // Clicking back on the first point of a line closes it into a polygon.
+      if (this.type === "line" && el.points.length >= 4 && distance(e.scene, this.abs(el, 0)) * zoom < 8) {
+        const pts = el.points.slice();
+        pts[pts.length - 1] = [0, 0];
+        this.store.scene.update(el.id, { ...linearPatch(pts), polygon: true });
+        this.finalize(false);
+        return;
+      }
       // Clicking on the last placed point (or double-clicking) finishes the line.
-      if (el.points.length >= 3 && distance(e.scene, fixedLast) * this.store.state.zoom < 8) {
+      if (el.points.length >= 3 && distance(e.scene, fixedLast) * zoom < 8) {
         this.finalize();
         return;
       }
@@ -100,6 +110,15 @@ export class LinearTool implements ToolHandler {
     if (pts.length < 2) {
       this.store.scene.remove(el.id);
       return;
+    }
+    // A curved two-point line or arrow has nothing to bend yet: give it a gentle bow.
+    if (el.arrowType === "round" && pts.length === 2) {
+      const mid = bowPoint(
+        [el.x + pts[0][0], el.y + pts[0][1]],
+        [el.x + pts[1][0], el.y + pts[1][1]],
+        0.2,
+      );
+      pts.splice(1, 0, [mid[0] - el.x, mid[1] - el.y]);
     }
     this.store.scene.update(el.id, linearPatch(pts));
     this.store.select([el.id]);

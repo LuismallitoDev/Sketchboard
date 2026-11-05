@@ -60,7 +60,9 @@ export function newLinear(
     ...linearPatch(points),
     startArrowhead: type === "arrow" ? style.startArrowhead : null,
     endArrowhead: type === "arrow" ? style.endArrowhead : null,
-    arrowType: style.arrowType,
+    // Arrows take the arrow type; lines are either straight or curved.
+    arrowType: type === "arrow" ? style.arrowType : style.lineCurved ? "round" : "sharp",
+    polygon: false,
     startBinding: null,
     endBinding: null,
   };
@@ -93,33 +95,50 @@ export function newText(x: number, y: number, style: ItemStyle, text = ""): Text
     containerId: null,
     lineHeight: LINE_HEIGHT,
     autoResize: true,
+    wrapWidth: null,
   };
 }
 
-/** Deep-ish copies with fresh ids, offset by (dx, dy). Group ids are remapped so copies stay grouped together. */
+/**
+ * Copies with fresh ids, offset by (dx, dy). Group ids are remapped so copies stay grouped together, and
+ * links between the copied elements (label to container, arrow to shape) point at the copies. Pass labels along
+ * with their containers (see withBoundTexts); a link to an element that is not copied is dropped.
+ */
 export function cloneElements(els: readonly SketchElement[], dx: number, dy: number): SketchElement[] {
+  const idMap = new Map(els.map((e) => [e.id, newId()]));
   const groupMap = new Map<string, string>();
   const mapGroup = (g: string) => {
     let n = groupMap.get(g);
     if (!n) groupMap.set(g, (n = newId()));
     return n;
   };
+  const remapBinding = (b: { elementId: string; focus: number; gap: number } | null) =>
+    b && idMap.has(b.elementId) ? { ...b, elementId: idMap.get(b.elementId)! } : null;
+
   return els.map((el) => {
+    const links = (el.boundElements ?? []).filter((b) => idMap.has(b.id)).map((b) => ({ ...b, id: idMap.get(b.id)! }));
     const copy = {
       ...el,
-      id: newId(),
+      id: idMap.get(el.id)!,
       x: el.x + dx,
       y: el.y + dy,
       version: 1,
       versionNonce: newNonce(),
       groupIds: el.groupIds.map(mapGroup),
-      boundElements: null,
+      boundElements: links.length ? links : null,
       ...("points" in el ? { points: el.points.map((p): Pt => [p[0], p[1]]) } : {}),
       ...("pressures" in el ? { pressures: [...el.pressures] } : {}),
     } as SketchElement;
-    if (copy.type === "arrow") {
-      copy.startBinding = null;
-      copy.endBinding = null;
+    if (copy.type === "arrow" || copy.type === "line") {
+      copy.startBinding = remapBinding(copy.startBinding);
+      copy.endBinding = remapBinding(copy.endBinding);
+    }
+    if (copy.type === "text" && copy.containerId) {
+      copy.containerId = idMap.get(copy.containerId) ?? null;
+      if (!copy.containerId) {
+        copy.autoResize = true;
+        copy.wrapWidth = null;
+      }
     }
     return copy;
   });

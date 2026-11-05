@@ -20,7 +20,32 @@ export type IconName =
   | "plus"
   | "minus"
   | "trash"
-  | "copy";
+  | "copy"
+  | "layerFront"
+  | "layerBack"
+  | "layerForward"
+  | "layerBackward"
+  | "alignLeft"
+  | "alignRight"
+  | "alignTop"
+  | "alignBottom"
+  | "alignCenterH"
+  | "alignCenterV"
+  | "distributeH"
+  | "distributeV"
+  | "group"
+  | "ungroup"
+  | "flipH"
+  | "flipV"
+  | "copyStyle"
+  | "pasteStyle"
+  | "eyedropper"
+  | "polygon"
+  | "bindText"
+  | "unbindText"
+  | "wrapText"
+  | "straight"
+  | "curved";
 
 const PATHS: Record<IconName, ReactNode> = {
   hand: <path d="M8 13V6.5a1.5 1.5 0 013 0V12 M11 11.5V4.5a1.5 1.5 0 013 0V12 M14 12V6.5a1.5 1.5 0 013 0V14c0 4.5-2.4 7-6 7-3 0-4.6-1.6-6.2-4.4l-1.7-3a1.5 1.5 0 012.5-1.6L8 14" />,
@@ -53,6 +78,53 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" />
     </>
   ),
+  layerFront: (
+    <>
+      <rect x="4" y="4" width="11" height="11" rx="1.5" />
+      <rect x="9" y="9" width="11" height="11" rx="1.5" fill="currentColor" fillOpacity="0.35" />
+    </>
+  ),
+  layerBack: (
+    <>
+      <rect x="4" y="4" width="11" height="11" rx="1.5" fill="currentColor" fillOpacity="0.35" />
+      <rect x="9" y="9" width="11" height="11" rx="1.5" />
+    </>
+  ),
+  layerForward: (
+    <>
+      <rect x="5" y="11" width="10" height="9" rx="1.5" />
+      <rect x="10" y="7" width="10" height="9" rx="1.5" fill="currentColor" fillOpacity="0.35" />
+      <path d="M7 4h3 M8.5 4V1.5" />
+    </>
+  ),
+  layerBackward: (
+    <>
+      <rect x="10" y="7" width="10" height="9" rx="1.5" />
+      <rect x="5" y="11" width="10" height="9" rx="1.5" fill="currentColor" fillOpacity="0.35" />
+      <path d="M17 20h3" />
+    </>
+  ),
+  alignLeft: <path d="M4 4v16 M8 7h12 M8 13h8" />,
+  alignRight: <path d="M20 4v16 M4 7h12 M8 13h8" />,
+  alignTop: <path d="M4 4h16 M7 8v12 M13 8v8" />,
+  alignBottom: <path d="M4 20h16 M7 4v12 M13 8v8" />,
+  alignCenterH: <path d="M12 3v18 M5 8h14 M8 14h8" />,
+  alignCenterV: <path d="M3 12h18 M8 5v14 M14 8v8" />,
+  distributeH: <path d="M4 4v16 M20 4v16 M9 8h6v8H9z" />,
+  distributeV: <path d="M4 4h16 M4 20h16 M8 9h8v6H8z" />,
+  group: <path d="M4 4h16v16H4z M8 8h5v5H8z M11 11h5v5h-5z" />,
+  ungroup: <path d="M4 4h7v7H4z M13 13h7v7h-7z" />,
+  flipH: <path d="M12 3v18 M8 7L3 12l5 5z M16 7l5 5-5 5z" />,
+  flipV: <path d="M3 12h18 M7 8l5-5 5 5z M7 16l5 5 5-5z" />,
+  copyStyle: <path d="M5 19l4-1 8-8-3-3-8 8z M14 7l3 3 M16 5l2-2 3 3-2 2" />,
+  pasteStyle: <path d="M8 4h8v3H8z M6 6h12v14H6z M10 12h4 M10 16h4" />,
+  eyedropper: <path d="M13 7l4 4 M15.5 4.5l4 4-2 2-4-4z M13 7L5.5 14.5 4 20l5.5-1.5L17 11" />,
+  polygon: <path d="M12 4l8 6-3 9H7l-3-9z" />,
+  bindText: <path d="M4 6h16v12H4z M8 10h8 M8 14h5" />,
+  unbindText: <path d="M4 6h16v12H4z M8 10h8 M8 14h5 M3 21L21 3" />,
+  wrapText: <path d="M3 5h18v14H3z M9 16V9h6 M12 9v7" />,
+  straight: <path d="M4 18L20 6" />,
+  curved: <path d="M4 18C8 4 14 22 20 6" />,
 };
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {

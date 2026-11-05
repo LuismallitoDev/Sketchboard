@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
+import { actionByName, runAction } from "../actions";
 import { t } from "../i18n";
 import { FONT_FAMILY_CSS, FONT_SIZES, ROUGHNESS_LEVELS, STROKE_WIDTHS } from "../scene/constants";
 import type { ElementType, ItemStyle, SketchElement } from "../scene/types";
 import type { ToolType } from "../state/appState";
-import { applyItemStyle, selectedElements } from "../state/operations";
+import { applyItemStyle, convertSelectedType, selectedElements, setTextMode, setViewBackground } from "../state/operations";
 import { stylePatchFor } from "../state/style";
-import { BACKGROUND_TOP_PICKS, STROKE_TOP_PICKS } from "./colors";
+import { ArrowheadPicker } from "./ArrowheadPicker";
+import { BACKGROUND_TOP_PICKS, STROKE_TOP_PICKS, VIEW_BACKGROUNDS } from "./colors";
 import { ColorField } from "./ColorPicker";
+import { Icon, type IconName } from "./icons";
 import { useStore, useStoreVersion } from "./StoreContext";
 
 const TOOL_TYPES: Partial<Record<ToolType, ElementType>> = {
@@ -19,11 +22,17 @@ const TOOL_TYPES: Partial<Record<ToolType, ElementType>> = {
   text: "text",
 };
 
+/** The value of a style property on an element, in the terms of ItemStyle. */
+function readStyle(el: SketchElement, key: keyof ItemStyle): unknown {
+  if (key === "lineCurved") return el.type === "line" ? el.arrowType === "round" : undefined;
+  return (el as unknown as Record<string, unknown>)[key];
+}
+
 /** The value of a style property across the selection (null when mixed), or the current default with no selection. */
 function styleValue<K extends keyof ItemStyle>(sel: readonly SketchElement[], current: ItemStyle, key: K): ItemStyle[K] | null {
   if (sel.length === 0) return current[key];
   const probe = { [key]: current[key] } as Partial<ItemStyle>;
-  const vals = sel.filter((e) => Object.keys(stylePatchFor(e, probe)).length > 0).map((e) => (e as unknown as ItemStyle)[key]);
+  const vals = sel.filter((e) => Object.keys(stylePatchFor(e, probe)).length > 0).map((e) => readStyle(e, key) as ItemStyle[K]);
   if (vals.length === 0) return current[key];
   return vals.every((v) => Object.is(v, vals[0])) ? vals[0] : null;
 }
@@ -65,6 +74,37 @@ const line = (d: string, dash?: string) => (
   </svg>
 );
 
+/** A button that runs a registered action; disabled when the action does not apply to the selection. */
+function ActionButton({ name, icon, hideWhenDisabled = false }: { name: string; icon: IconName; hideWhenDisabled?: boolean }) {
+  const store = useStore();
+  const a = actionByName(name);
+  if (!a) return null;
+  const enabled = a.enabled?.(store) ?? true;
+  if (!enabled && hideWhenDisabled) return null;
+  return (
+    <button
+      type="button"
+      className="btn small"
+      disabled={!enabled}
+      title={a.shortcut ? `${a.label} — ${a.shortcut}` : a.label}
+      aria-label={a.label}
+      data-testid={`action-${name}`}
+      onClick={() => runAction(store, name)}
+    >
+      <Icon name={icon} size={18} />
+    </button>
+  );
+}
+
+function ActionRow({ label, children, testId }: { label: string; children: ReactNode; testId?: string }) {
+  return (
+    <section data-testid={testId}>
+      <h3>{label}</h3>
+      <div className="choices actions">{children}</div>
+    </section>
+  );
+}
+
 export function PropertiesPanel() {
   const store = useStore();
   useStoreVersion();
@@ -72,24 +112,50 @@ export function PropertiesPanel() {
   const sel = selectedElements(store);
   const toolType = TOOL_TYPES[s.tool];
   const kinds = new Set<ElementType>(sel.length ? sel.map((e) => e.type) : toolType ? [toolType] : []);
-  if (kinds.size === 0) return null;
+
+  // Nothing to style: with the selection tool and an empty selection the panel offers the canvas background.
+  if (kinds.size === 0) {
+    if (s.tool !== "selection" || sel.length > 0) return null;
+    return (
+      <div className="island panel" aria-label="Canvas" data-testid="properties-panel">
+        <section>
+          <h3>{t("prop.canvasBackground")}</h3>
+          <ColorField
+            label={t("prop.canvasBackground")}
+            value={s.viewBackgroundColor}
+            picks={VIEW_BACKGROUNDS}
+            onChange={(c) => setViewBackground(store, c)}
+            testId="canvas-background"
+          />
+        </section>
+      </div>
+    );
+  }
 
   const has = (...types: ElementType[]) => types.some((x) => kinds.has(x));
   const val = <K extends keyof ItemStyle>(k: K) => styleValue(sel, s.currentItem, k);
   const set = (patch: Partial<ItemStyle>) => applyItemStyle(store, patch);
 
   const isShape = has("rectangle", "diamond", "ellipse");
+  const hasFill = isShape || sel.some((e) => e.type === "line" && e.polygon);
   const hasStrokeLook = isShape || has("line", "arrow");
   const opacity = val("opacity");
+  const looseTexts = sel.filter((e) => e.type === "text" && !e.containerId);
+  const textMode: "auto" | "fixed" | null =
+    looseTexts.length === 0 ? null : looseTexts.every((e) => e.type === "text" && e.autoResize) ? "auto" : looseTexts.every((e) => e.type === "text" && !e.autoResize) ? "fixed" : null;
+  const allShapes = sel.length > 0 && sel.every((e) => e.type === "rectangle" || e.type === "diamond" || e.type === "ellipse");
+  const allLinear = sel.length > 0 && sel.every((e) => e.type === "line" || e.type === "arrow");
+  const sameType = (types: readonly ElementType[]): ElementType | null =>
+    sel.length > 0 && sel.every((e) => e.type === sel[0].type) && types.includes(sel[0].type) ? sel[0].type : null;
 
   return (
     <div className="island panel" aria-label="Properties" data-testid="properties-panel">
       <section>
         <h3>{t("prop.stroke")}</h3>
-        <ColorField label={t("prop.stroke")} value={val("strokeColor")} picks={STROKE_TOP_PICKS} onChange={(c) => set({ strokeColor: c })} testId="stroke-color" />
+        <ColorField label={t("prop.stroke")} value={val("strokeColor")} picks={STROKE_TOP_PICKS} onChange={(c) => set({ strokeColor: c })} testId="stroke-color" eyedropper="stroke" />
       </section>
 
-      {isShape && (
+      {hasFill && (
         <section>
           <h3>{t("prop.background")}</h3>
           <ColorField
@@ -99,11 +165,12 @@ export function PropertiesPanel() {
             allowTransparent
             onChange={(c) => set({ backgroundColor: c })}
             testId="background-color"
+            eyedropper="background"
           />
         </section>
       )}
 
-      {isShape && (
+      {hasFill && (
         <ChoiceRow
           label={t("prop.fill")}
           testId="fill-style"
@@ -175,28 +242,38 @@ export function PropertiesPanel() {
         />
       )}
 
+      {has("line") && (
+        <ChoiceRow
+          label="Line style"
+          testId="line-style"
+          value={val("lineCurved")}
+          onChange={(v) => set({ lineCurved: v })}
+          options={[
+            { id: "straight", value: false, title: "Straight", node: <Icon name="straight" size={18} /> },
+            { id: "curved", value: true, title: "Curved", node: <Icon name="curved" size={18} /> },
+          ]}
+        />
+      )}
+
       {has("arrow") && (
         <>
           <ChoiceRow
-            label={`${t("prop.arrowheads")} · start`}
-            testId="arrowhead-start"
-            value={val("startArrowhead")}
-            onChange={(v) => set({ startArrowhead: v })}
+            label={t("prop.arrowType")}
+            testId="arrow-type"
+            value={val("arrowType")}
+            onChange={(v) => set({ arrowType: v })}
             options={[
-              { id: "none", value: null, title: "No arrowhead", node: line("M4 7h16") },
-              { id: "arrow", value: "arrow" as const, title: "Arrow", node: line("M4 7h16 M10 2L4 7l6 5") },
+              { id: "sharp", value: "sharp" as const, title: "Sharp arrow", node: <Icon name="straight" size={18} /> },
+              { id: "round", value: "round" as const, title: "Curved arrow", node: <Icon name="curved" size={18} /> },
             ]}
           />
-          <ChoiceRow
-            label={`${t("prop.arrowheads")} · end`}
-            testId="arrowhead-end"
-            value={val("endArrowhead")}
-            onChange={(v) => set({ endArrowhead: v })}
-            options={[
-              { id: "none", value: null, title: "No arrowhead", node: line("M2 7h16") },
-              { id: "arrow", value: "arrow" as const, title: "Arrow", node: line("M2 7h16 M12 2l6 5-6 5") },
-            ]}
-          />
+          <section>
+            <h3>{t("prop.arrowheads")}</h3>
+            <div className="choices">
+              <ArrowheadPicker label="Start arrowhead" side="start" value={val("startArrowhead")} onChange={(v) => set({ startArrowhead: v })} testId="arrowhead-start" />
+              <ArrowheadPicker label="End arrowhead" side="end" value={val("endArrowhead")} onChange={(v) => set({ endArrowhead: v })} testId="arrowhead-end" />
+            </div>
+          </section>
         </>
       )}
 
@@ -251,6 +328,18 @@ export function PropertiesPanel() {
               { id: "right", value: "right" as const, title: "Right", node: line("M3 3h16 M9 7h10 M6 11h13") },
             ]}
           />
+          {looseTexts.length > 0 && (
+            <ChoiceRow
+              label={t("prop.textMode")}
+              testId="text-mode"
+              value={textMode}
+              onChange={(m) => setTextMode(store, m)}
+              options={[
+                { id: "auto", value: "auto" as const, title: "Fit to text", node: <span className="text-choice">Auto</span> },
+                { id: "fixed", value: "fixed" as const, title: "Fixed width, wrap text", node: <span className="text-choice">Wrap</span> },
+              ]}
+            />
+          )}
         </>
       )}
 
@@ -269,6 +358,76 @@ export function PropertiesPanel() {
           onChange={(e) => set({ opacity: Number(e.target.value) })}
         />
       </section>
+
+      {sel.length > 0 && (
+        <>
+          {allShapes && (
+            <ChoiceRow<ElementType>
+              label={t("prop.shapeType")}
+              testId="shape-type"
+              value={sameType(["rectangle", "diamond", "ellipse"])}
+              onChange={(v) => convertSelectedType(store, v)}
+              options={[
+                { id: "rectangle", value: "rectangle", title: "Rectangle", node: <Icon name="rectangle" size={18} /> },
+                { id: "diamond", value: "diamond", title: "Diamond", node: <Icon name="diamond" size={18} /> },
+                { id: "ellipse", value: "ellipse", title: "Ellipse", node: <Icon name="ellipse" size={18} /> },
+              ]}
+            />
+          )}
+          {allLinear && (
+            <ChoiceRow<ElementType>
+              label={t("prop.shapeType")}
+              testId="linear-type"
+              value={sameType(["line", "arrow"])}
+              onChange={(v) => convertSelectedType(store, v)}
+              options={[
+                { id: "line", value: "line", title: "Line", node: <Icon name="line" size={18} /> },
+                { id: "arrow", value: "arrow", title: "Arrow", node: <Icon name="arrow" size={18} /> },
+              ]}
+            />
+          )}
+
+          <ActionRow label={t("prop.layers")} testId="layers">
+            <ActionButton name="sendToBack" icon="layerBack" />
+            <ActionButton name="sendBackward" icon="layerBackward" />
+            <ActionButton name="bringForward" icon="layerForward" />
+            <ActionButton name="bringToFront" icon="layerFront" />
+          </ActionRow>
+
+          {sel.length >= 2 && (
+            <ActionRow label={t("prop.align")} testId="align">
+              <ActionButton name="align:left" icon="alignLeft" />
+              <ActionButton name="align:centerH" icon="alignCenterH" />
+              <ActionButton name="align:right" icon="alignRight" />
+              <ActionButton name="align:top" icon="alignTop" />
+              <ActionButton name="align:centerV" icon="alignCenterV" />
+              <ActionButton name="align:bottom" icon="alignBottom" />
+              {sel.length >= 3 && (
+                <>
+                  <ActionButton name="distribute:h" icon="distributeH" />
+                  <ActionButton name="distribute:v" icon="distributeV" />
+                </>
+              )}
+            </ActionRow>
+          )}
+
+          <ActionRow label={t("prop.actions")} testId="actions">
+            <ActionButton name="duplicate" icon="copy" />
+            <ActionButton name="delete" icon="trash" />
+            <ActionButton name="group" icon="group" />
+            <ActionButton name="ungroup" icon="ungroup" />
+            <ActionButton name="lock" icon="lock" />
+            <ActionButton name="flip:h" icon="flipH" />
+            <ActionButton name="flip:v" icon="flipV" />
+            <ActionButton name="copyStyle" icon="copyStyle" />
+            <ActionButton name="pasteStyle" icon="pasteStyle" />
+            {has("line") && <ActionButton name="togglePolygon" icon="polygon" />}
+            {looseTexts.length > 0 && <ActionButton name="wrapTextInContainer" icon="wrapText" />}
+            <ActionButton name="bindText" icon="bindText" hideWhenDisabled />
+            <ActionButton name="unbindText" icon="unbindText" hideWhenDisabled />
+          </ActionRow>
+        </>
+      )}
     </div>
   );
 }

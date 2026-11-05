@@ -40,6 +40,15 @@ export interface AppState {
   erasingIds: readonly string[];
   cursor: string;
 
+  /** The line or arrow whose points are being edited. */
+  editingLinearId: string | null;
+  selectedPoints: readonly number[];
+  /** Colour picking from the canvas: which colour it will set, and the colour under the pointer. */
+  eyedropper: { target: "stroke" | "background"; color: string | null; x: number; y: number } | null;
+  dialog: "clear" | null;
+  /** Style copied with "copy style", pasted onto other elements. */
+  copiedStyle: Partial<ItemStyle> | null;
+
   theme: Theme;
   viewBackgroundColor: string;
   /** Style applied to the next element. */
@@ -61,6 +70,11 @@ export function defaultAppState(): AppState {
     selectionBox: null,
     erasingIds: [],
     cursor: "default",
+    editingLinearId: null,
+    selectedPoints: [],
+    eyedropper: null,
+    dialog: null,
+    copiedStyle: null,
     theme: "system",
     viewBackgroundColor: DEFAULT_VIEW_BACKGROUND,
     currentItem: { ...DEFAULT_STYLE },

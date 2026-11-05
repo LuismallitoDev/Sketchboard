@@ -13,7 +13,8 @@ export class EraserTool implements ToolHandler {
   private sample(p: Point, revert: boolean) {
     const tol = 5 / this.store.state.zoom;
     for (const el of this.store.scene.visible()) {
-      if (el.locked) continue;
+      // Labels are erased with their container.
+      if (el.locked || (el.type === "text" && el.containerId)) continue;
       if (hitElement(el, p, tol)) {
         if (revert) this.ids.delete(el.id);
         else this.ids.add(el.id);

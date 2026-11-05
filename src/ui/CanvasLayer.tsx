@@ -3,7 +3,7 @@ import type { InteractionController } from "../input/controller";
 import type { PointerInfo } from "../input/types";
 import { renderInteractive } from "../render/renderInteractive";
 import { renderStatic } from "../render/renderStatic";
-import { resolveTheme, setZoom } from "../state/operations";
+import { cancelEyedropper, pickEyedropperColor, resolveTheme, setZoom } from "../state/operations";
 import { screenToScene } from "../state/viewport";
 import { TextEditor } from "./TextEditor";
 import { useStore, useStoreVersion } from "./StoreContext";
@@ -111,6 +111,16 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
     return () => canvas.removeEventListener("wheel", onWheel);
   }, [store]);
 
+  /** The colour of the scene pixel under a screen position (raw element colours: the dark-mode filter is CSS only). */
+  const sampleColor = (sx: number, sy: number): string | null => {
+    const ctx = staticRef.current?.getContext("2d");
+    if (!ctx) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const d = ctx.getImageData(Math.round(sx * dpr), Math.round(sy * dpr), 1, 1).data;
+    if (d[3] === 0) return null;
+    return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+  };
+
   const info = (e: PointerLike): PointerInfo => {
     const rect = interactiveRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -138,11 +148,28 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
         style={{ cursor: store.state.cursor }}
         data-testid="canvas"
         onPointerDown={(e) => {
+          const dropper = store.state.eyedropper;
+          if (dropper) {
+            // Colour picking takes over the pointer: a click applies the colour under it.
+            const i = info(e);
+            const color = sampleColor(i.screen[0], i.screen[1]);
+            if (color) pickEyedropperColor(store, color);
+            else cancelEyedropper(store);
+            return;
+          }
           e.currentTarget.setPointerCapture(e.pointerId);
           if (e.button === 1) e.preventDefault();
           controller.pointerDown(info(e));
         }}
-        onPointerMove={(e) => controller.pointerMove(info(e))}
+        onPointerMove={(e) => {
+          const dropper = store.state.eyedropper;
+          if (dropper) {
+            const i = info(e);
+            store.setState({ eyedropper: { ...dropper, color: sampleColor(i.screen[0], i.screen[1]), x: i.screen[0], y: i.screen[1] } });
+            return;
+          }
+          controller.pointerMove(info(e));
+        }}
         onPointerUp={(e) => {
           if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
           controller.pointerUp(info(e));
@@ -153,6 +180,12 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
       />
       <div className="dom-layer">
         <TextEditor />
+        {store.state.eyedropper?.color && (
+          <div className="eyedropper-chip" data-testid="eyedropper-chip" style={{ left: store.state.eyedropper.x + 18, top: store.state.eyedropper.y + 18 }}>
+            <span style={{ background: store.state.eyedropper.color }} />
+            {store.state.eyedropper.color}
+          </div>
+        )}
       </div>
     </div>
   );

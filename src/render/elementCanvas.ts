@@ -2,10 +2,12 @@ import { getStroke } from "perfect-freehand";
 import rough from "roughjs";
 import type { Drawable, Options } from "roughjs/bin/core";
 import { getLocalBox } from "../geometry/bounds";
-import type { Point } from "../geometry/math";
-import { fontString } from "../geometry/text";
+import { polylineLength, sampleCurve } from "../geometry/curve";
+import { distance, type Point } from "../geometry/math";
+import { fontString, layoutText } from "../geometry/text";
 import { pointsBBox } from "../scene/linear";
 import type { FreedrawElement, LinearElement, ShapeElement, SketchElement, TextElement } from "../scene/types";
+import { arrowheadPrimitives, type Prim } from "./arrowheads";
 
 const generator = rough.generator();
 const MAX_CANVAS_DIM = 4096;
@@ -22,7 +24,7 @@ const canvasCache = new WeakMap<SketchElement, CanvasEntry>();
 /** Extra room around the element's box for stroke width, rough wobble and arrowheads. */
 export function getRenderPad(el: SketchElement): number {
   let pad = 6 + el.strokeWidth * 2 + el.roughness * 2;
-  if (el.type === "arrow") pad += 30;
+  if (el.type === "arrow") pad += 48; // room for the largest arrowheads
   if (el.type === "freedraw") pad += el.strokeWidth * 4;
   return Math.ceil(pad);
 }
@@ -71,13 +73,25 @@ export function localPoints(el: LinearElement | FreedrawElement): Point[] {
   return el.points.map((p): Point => [p[0] - b.minX, p[1] - b.minY]);
 }
 
-function arrowheadArms(tip: Point, from: Point, size: number): [Point, Point] {
-  const angle = Math.atan2(tip[1] - from[1], tip[0] - from[0]);
-  const spread = (22 * Math.PI) / 180;
-  return [
-    [tip[0] - size * Math.cos(angle - spread), tip[1] - size * Math.sin(angle - spread)],
-    [tip[0] - size * Math.cos(angle + spread), tip[1] - size * Math.sin(angle + spread)],
-  ];
+const HEAD_FILL_OUTLINE = "#ffffff"; // "outline" heads are filled with the canvas colour so the line does not show through
+
+function primDrawable(p: Prim, base: Options, stroke: string): Drawable {
+  const solid = (filled: boolean): Options => ({ ...base, fill: filled ? stroke : HEAD_FILL_OUTLINE, fillStyle: "solid" });
+  switch (p.k) {
+    case "line":
+      return generator.line(p.a[0], p.a[1], p.b[0], p.b[1], base);
+    case "poly":
+      return generator.polygon(p.pts as [number, number][], solid(p.filled));
+    case "circle":
+      return generator.circle(p.c[0], p.c[1], p.r * 2, solid(p.filled));
+  }
+}
+
+/** Where an arrowhead at the end of a path points from: a point a few pixels back along the visible path. */
+function headDirectionPoint(path: readonly Point[], atStart: boolean): Point {
+  const ordered = atStart ? path : [...path].reverse(); // ordered[0] is the tip
+  for (let i = 1; i < ordered.length; i++) if (distance(ordered[0], ordered[i]) >= 4) return ordered[i];
+  return ordered[ordered.length - 1];
 }
 
 function drawablesFor(el: ShapeElement | LinearElement): Drawable[] {
@@ -87,17 +101,25 @@ function drawablesFor(el: ShapeElement | LinearElement): Drawable[] {
   const out: Drawable[] = [];
   if (el.type === "line" || el.type === "arrow") {
     const pts = localPoints(el);
-    if (pts.length >= 2) out.push(generator.linearPath(pts as [number, number][], { ...opts, fill: undefined }));
+    const curved = el.arrowType === "round" && pts.length >= 3 && !el.polygon;
+    if (el.polygon && pts.length >= 4) {
+      out.push(generator.polygon(pts.slice(0, -1) as [number, number][], opts)); // closed and fillable
+    } else if (pts.length >= 2) {
+      const lineOpts = { ...opts, fill: undefined };
+      out.push(curved ? generator.curve(pts as [number, number][], lineOpts) : generator.linearPath(pts as [number, number][], lineOpts));
+    }
     if (el.type === "arrow" && pts.length >= 2) {
       const headOpts: Options = { ...opts, fill: undefined, strokeLineDash: undefined, disableMultiStroke: true };
-      const addHead = (tip: Point, from: Point) => {
-        const segLen = Math.hypot(tip[0] - from[0], tip[1] - from[1]);
-        if (segLen < 1) return;
-        const size = Math.min(14 + el.strokeWidth * 3, segLen * 0.6);
-        for (const arm of arrowheadArms(tip, from, size)) out.push(generator.line(tip[0], tip[1], arm[0], arm[1], headOpts));
+      const path = curved ? sampleCurve(pts, 20) : pts;
+      const pathLen = polylineLength(path);
+      const addHead = (kind: NonNullable<LinearElement["endArrowhead"]>, tip: Point, atStart: boolean) => {
+        const from = headDirectionPoint(path, atStart);
+        if (distance(tip, from) < 1) return;
+        const size = Math.min(14 + el.strokeWidth * 3, pathLen * 0.6);
+        for (const p of arrowheadPrimitives(kind, tip, from, size)) out.push(primDrawable(p, headOpts, el.strokeColor));
       };
-      if (el.endArrowhead === "arrow") addHead(pts[pts.length - 1], pts[pts.length - 2]);
-      if (el.startArrowhead === "arrow") addHead(pts[0], pts[1]);
+      if (el.endArrowhead) addHead(el.endArrowhead, pts[pts.length - 1], false);
+      if (el.startArrowhead) addHead(el.startArrowhead, pts[0], true);
     }
   } else {
     const w = el.width;
@@ -151,7 +173,9 @@ function paintText(ctx: CanvasRenderingContext2D, el: TextElement) {
   ctx.textAlign = el.textAlign;
   const lh = el.fontSize * el.lineHeight;
   const x = el.textAlign === "left" ? 0 : el.textAlign === "center" ? el.width / 2 : el.width;
-  el.text.split("\n").forEach((line, i) => ctx.fillText(line, x, i * lh + (lh - el.fontSize) / 2));
+  // Wrapped text (fixed width or inside a container) breaks lines the same way the layout pass did.
+  const { lines } = layoutText(el.text, el.fontSize, el.fontFamily, el.lineHeight, el.wrapWidth);
+  lines.forEach((line, i) => ctx.fillText(line, x, i * lh + (lh - el.fontSize) / 2));
 }
 
 function getEntry(el: SketchElement, zoom: number, dpr: number): CanvasEntry {

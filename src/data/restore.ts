@@ -1,4 +1,4 @@
-import { measureText } from "../geometry/text";
+import { layoutText } from "../geometry/text";
 import { DEFAULT_STYLE, LINE_HEIGHT, MAX_ZOOM, MIN_ZOOM } from "../scene/constants";
 import { newId, newNonce, newSeed } from "../scene/ids";
 import { linearPatchFromAbs } from "../scene/linear";
@@ -31,7 +31,22 @@ const FONTS: readonly FontFamily[] = ["hand", "normal", "code"];
 const ALIGNS: readonly TextAlign[] = ["left", "center", "right"];
 const VALIGNS: readonly VerticalAlign[] = ["top", "middle", "bottom"];
 const ARROW_TYPES: readonly ArrowType[] = ["sharp", "round", "elbow"];
-const ARROWHEADS: readonly Arrowhead[] = ["arrow"];
+const ARROWHEADS: readonly Arrowhead[] = [
+  "arrow",
+  "bar",
+  "circle",
+  "circle_outline",
+  "triangle",
+  "triangle_outline",
+  "diamond",
+  "diamond_outline",
+  "crowfoot_many",
+  "crowfoot_one",
+  "crowfoot_one_or_many",
+  "cardinality_exactly_one",
+  "cardinality_zero_or_one",
+  "cardinality_zero_or_many",
+];
 const THEMES: readonly Theme[] = ["light", "dark", "system"];
 
 function restorePoints(v: unknown): Pt[] | null {
@@ -104,6 +119,7 @@ export function restoreElement(raw: unknown): SketchElement | null {
         startArrowhead: type === "arrow" ? nullableArrowhead(r.startArrowhead, null) : null,
         endArrowhead: type === "arrow" ? nullableArrowhead(r.endArrowhead, "arrow") : null,
         arrowType: oneOf(r.arrowType, ARROW_TYPES, "sharp"),
+        polygon: type === "line" && bool(r.polygon, false) && pts.length >= 4,
         startBinding: null,
         endBinding: null,
       };
@@ -127,21 +143,25 @@ export function restoreElement(raw: unknown): SketchElement | null {
       const fontSize = Math.max(4, num(r.fontSize, DEFAULT_STYLE.fontSize));
       const fontFamily = oneOf(r.fontFamily, FONTS, DEFAULT_STYLE.fontFamily);
       const lineHeight = num(r.lineHeight, LINE_HEIGHT);
-      const m = measureText(text, fontSize, fontFamily, lineHeight);
+      const wrapWidth = typeof r.wrapWidth === "number" && Number.isFinite(r.wrapWidth) && r.wrapWidth > 0 ? r.wrapWidth : null;
+      const containerId = typeof r.containerId === "string" ? r.containerId : null;
+      const m = layoutText(text, fontSize, fontFamily, lineHeight, wrapWidth);
       return {
         ...base,
         type,
         backgroundColor: "transparent",
-        width: m.width,
+        // Bound text is laid out by its container; free text fits itself or wraps at its width.
+        width: wrapWidth !== null && !containerId ? wrapWidth : m.width,
         height: m.height,
         text,
         fontSize,
         fontFamily,
         textAlign: oneOf(r.textAlign, ALIGNS, "left"),
         verticalAlign: oneOf(r.verticalAlign, VALIGNS, "top"),
-        containerId: typeof r.containerId === "string" ? r.containerId : null,
+        containerId,
         lineHeight,
-        autoResize: bool(r.autoResize, true),
+        autoResize: wrapWidth === null && !containerId,
+        wrapWidth,
       };
     }
   }
@@ -179,6 +199,7 @@ export function restoreItemStyle(raw: unknown): ItemStyle {
     startArrowhead: nullableArrowhead(r.startArrowhead, d.startArrowhead),
     endArrowhead: nullableArrowhead(r.endArrowhead, d.endArrowhead),
     arrowType: oneOf(r.arrowType, ARROW_TYPES, d.arrowType),
+    lineCurved: bool(r.lineCurved, d.lineCurved),
     simulatePressure: bool(r.simulatePressure, d.simulatePressure),
   };
 }

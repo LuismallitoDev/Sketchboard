@@ -14,6 +14,8 @@ export class Scene {
   private listeners = new Set<() => void>();
   private depth = 0;
   private dirty = false;
+  private normalizing = false;
+  private normalizers: Array<(scene: Scene) => void> = [];
 
   subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn);
@@ -22,14 +24,28 @@ export class Scene {
     };
   };
 
+  /**
+   * Registers a pass that runs after every change, before listeners hear about it, and may edit the scene
+   * (used to keep labels centred in their containers). Its edits belong to the change that caused it.
+   */
+  addNormalizer(fn: (scene: Scene) => void) {
+    this.normalizers.push(fn);
+  }
+
   private touch() {
     this.snap = null;
     this.vis = null;
-    if (this.depth > 0) this.dirty = true;
+    if (this.depth > 0 || this.normalizing) this.dirty = true;
     else this.emit();
   }
 
   private emit() {
+    this.normalizing = true;
+    try {
+      for (const n of this.normalizers) n(this);
+    } finally {
+      this.normalizing = false;
+    }
     this.dirty = false;
     for (const l of [...this.listeners]) l();
   }

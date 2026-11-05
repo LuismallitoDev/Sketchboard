@@ -1,11 +1,6 @@
-import {
-  boundsContain,
-  boxCenter,
-  getElementBounds,
-  isPointInBox,
-  type Box,
-} from "../geometry/bounds";
+import { boundsContain, boxCenter, getElementBounds, isPointInBox, type Box } from "../geometry/bounds";
 import { topElementAt } from "../geometry/hit";
+import { hitLinearHandle, insertPointPatch, linearHandles, movePointsPatch } from "../geometry/linearEdit";
 import { distance, snapAngle, type Point } from "../geometry/math";
 import {
   getSelectionFrame,
@@ -20,8 +15,9 @@ import {
 import type { PointerInfo, ToolHandler } from "../input/types";
 import { allowedHandles } from "../render/renderInteractive";
 import { cloneElements } from "../scene/factory";
-import type { SketchElement } from "../scene/types";
-import { selectedElements } from "../state/operations";
+import { groupAwareBoxSelection, isBoundText, resolveSelection, withBoundTexts } from "../scene/selection";
+import type { LinearElement, SketchElement } from "../scene/types";
+import { exitLinearEdit, removeSelectedPoints, selectedElements, selectIds } from "../state/operations";
 import type { Store } from "../state/store";
 
 type Mode =
@@ -38,7 +34,8 @@ type Mode =
     }
   | { kind: "resize"; handle: ResizeHandle; frame: Frame; originals: SketchElement[]; grab: Point; changed: boolean }
   | { kind: "rotate"; center: Point; startAngle: number; originals: SketchElement[]; changed: boolean }
-  | { kind: "box"; origin: Point; base: string[]; additive: boolean };
+  | { kind: "box"; origin: Point; base: string[]; additive: boolean }
+  | { kind: "point"; start: Point; original: LinearElement; indices: number[]; changed: boolean };
 
 const CURSORS: Record<HandleName, string> = {
   nw: "nwse-resize",
@@ -52,7 +49,11 @@ const CURSORS: Record<HandleName, string> = {
   rotate: "grab",
 };
 
-/** Click, shift-click, box select, drag to move (Alt = duplicate), resize and rotate handles. */
+/**
+ * Click, Shift-click, box select, drag to move (Alt = duplicate), resize and rotate handles. Selecting an element
+ * selects its whole group (Ctrl/Cmd-click picks one member). While a line is in point-editing mode the pointer
+ * works on its points instead.
+ */
 export class SelectionTool implements ToolHandler {
   private mode: Mode | null = null;
 
@@ -62,8 +63,16 @@ export class SelectionTool implements ToolHandler {
     return 8 / this.store.state.zoom;
   }
 
+  private editingLine(): LinearElement | null {
+    const id = this.store.state.editingLinearId;
+    const el = id ? this.store.scene.get(id) : undefined;
+    return el && (el.type === "line" || el.type === "arrow") && !el.isDeleted ? el : null;
+  }
+
   /** The cursor to show for a pointer position (used when hovering). */
   cursorAt(e: PointerInfo): string {
+    const line = this.editingLine();
+    if (line) return hitLinearHandle(line, e.scene, this.store.state.zoom) ? "move" : "default";
     const selected = selectedElements(this.store);
     const frame = getSelectionFrame(selected);
     if (frame) {
@@ -76,6 +85,13 @@ export class SelectionTool implements ToolHandler {
   down(e: PointerInfo) {
     const store = this.store;
     const s = store.state;
+
+    const line = this.editingLine();
+    if (line) {
+      if (this.downOnPoints(line, e)) return;
+      exitLinearEdit(store); // clicking away leaves point editing, then acts as a normal click
+    }
+
     const selected = selectedElements(store);
     const frame = getSelectionFrame(selected);
 
@@ -106,13 +122,14 @@ export class SelectionTool implements ToolHandler {
       }
     }
 
+    const deep = e.ctrlKey || e.metaKey;
     const hit = topElementAt(store.scene.visible(), e.scene, this.tolerance());
     if (hit) {
       const already = s.selectedIds.includes(hit.id);
       if (e.shiftKey) {
-        if (!already) store.select([...s.selectedIds, hit.id]);
-      } else if (!already) {
-        store.select([hit.id]);
+        if (!already) selectIds(store, [...s.selectedIds, hit.id], deep);
+      } else if (!already || deep) {
+        selectIds(store, [hit.id], deep);
       }
       this.mode = {
         kind: "move",
@@ -148,6 +165,29 @@ export class SelectionTool implements ToolHandler {
     this.mode = { kind: "box", origin: e.scene, base: [...store.state.selectedIds], additive: e.shiftKey };
   }
 
+  /** Pointer down while editing a line's points. Returns false when the click missed every handle. */
+  private downOnPoints(line: LinearElement, e: PointerInfo): boolean {
+    const store = this.store;
+    const hit = hitLinearHandle(line, e.scene, store.state.zoom);
+    if (!hit) return false;
+    if (hit.kind === "point") {
+      const cur = store.state.selectedPoints;
+      let next: number[];
+      if (e.shiftKey) next = cur.includes(hit.index) ? cur.filter((i) => i !== hit.index) : [...cur, hit.index];
+      else next = cur.includes(hit.index) ? [...cur] : [hit.index];
+      store.setState({ selectedPoints: next });
+      this.mode = { kind: "point", start: e.scene, original: line, indices: next, changed: false };
+    } else {
+      // Dragging a midpoint inserts a new point there.
+      const at = linearHandles(line).mids[hit.index];
+      const patch = insertPointPatch(line, hit.index, at);
+      const updated = store.scene.update(line.id, patch) as LinearElement;
+      store.setState({ selectedPoints: [hit.index + 1] });
+      this.mode = { kind: "point", start: e.scene, original: updated, indices: [hit.index + 1], changed: true };
+    }
+    return true;
+  }
+
   move(e: PointerInfo) {
     const m = this.mode;
     if (!m) return;
@@ -158,10 +198,12 @@ export class SelectionTool implements ToolHandler {
         if (distance(e.screen, m.startScreen) < 3) return;
         m.moved = true;
         if (e.altKey && !m.duplicated) {
-          const copies = cloneElements(m.originals, 0, 0);
+          // Alt-drag: leave the originals and drag copies (with their labels).
+          const copies = cloneElements(withBoundTexts(scene.visible(), m.originals), 0, 0);
           scene.batch(() => copies.forEach((c) => scene.add(c)));
-          this.store.select(copies.map((c) => c.id));
-          m.originals = copies;
+          const movable = copies.filter((c) => !isBoundText(c));
+          this.store.select(movable.map((c) => c.id));
+          m.originals = movable;
           m.duplicated = true;
         }
       }
@@ -188,6 +230,12 @@ export class SelectionTool implements ToolHandler {
       const patches = rotateSelection(m.originals, m.center, delta);
       scene.batch(() => patches.forEach(([id, patch]) => scene.update(id, patch)));
       m.changed = true;
+    } else if (m.kind === "point") {
+      const dx = e.scene[0] - m.start[0];
+      const dy = e.scene[1] - m.start[1];
+      if (!m.changed && Math.hypot(dx, dy) * this.store.state.zoom < 2) return;
+      m.changed = true;
+      scene.update(m.original.id, movePointsPatch(m.original, m.indices, dx, dy));
     } else {
       const box: Box = {
         x: Math.min(m.origin[0], e.scene[0]),
@@ -196,11 +244,10 @@ export class SelectionTool implements ToolHandler {
         height: Math.abs(e.scene[1] - m.origin[1]),
       };
       const outer = [box.x, box.y, box.x + box.width, box.y + box.height] as const;
-      const inside = scene
-        .visible()
-        .filter((el) => !el.locked && boundsContain(outer, getElementBounds(el)))
-        .map((el) => el.id);
-      this.store.select(m.additive ? [...new Set([...m.base, ...inside])] : inside);
+      const visible = scene.visible();
+      const inside = new Set(visible.filter((el) => !el.locked && boundsContain(outer, getElementBounds(el))).map((el) => el.id));
+      const picked = groupAwareBoxSelection(visible, inside);
+      this.store.select(m.additive ? resolveSelection(visible, [...m.base, ...picked], { groups: false }) : picked);
       this.store.setState({ selectionBox: box });
     }
   }
@@ -214,14 +261,33 @@ export class SelectionTool implements ToolHandler {
       if (m.moved) {
         store.commit();
       } else if (m.hitId) {
-        if (m.shift && m.wasSelected) store.select(store.state.selectedIds.filter((id) => id !== m.hitId));
-        else if (!m.shift && store.state.selectedIds.length > 1) store.select([m.hitId]);
+        if (m.shift && m.wasSelected) {
+          // Shift-click on something already selected removes it (and the rest of its group).
+          const drop = new Set(resolveSelection(store.scene.visible(), [m.hitId], { groups: true }));
+          store.select(store.state.selectedIds.filter((id) => !drop.has(id)));
+        } else if (!m.shift && store.state.selectedIds.length > 1) {
+          // A plain click on one member of a multi-selection narrows the selection to it (or to its group).
+          selectIds(store, [m.hitId], false);
+        }
       }
-    } else if (m.kind === "resize" || m.kind === "rotate") {
+    } else if (m.kind === "resize" || m.kind === "rotate" || m.kind === "point") {
       if (m.changed) store.commit();
     } else {
       store.setState({ selectionBox: null });
     }
+  }
+
+  keyDown(e: KeyboardEvent): boolean {
+    if (!this.store.state.editingLinearId) return false;
+    if (e.key === "Escape" || e.key === "Enter") {
+      exitLinearEdit(this.store);
+      return true;
+    }
+    if (e.key === "Delete" || e.key === "Backspace") {
+      removeSelectedPoints(this.store);
+      return true; // never delete the whole line while editing its points
+    }
+    return false;
   }
 
   cancel() {

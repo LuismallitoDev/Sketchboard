@@ -1,6 +1,6 @@
 import { actionByName } from "../actions";
 import { t } from "../i18n";
-import { resetZoom, resolveTheme, toggleTheme, zoomBy } from "../state/operations";
+import { lockedCount, requestClearCanvas, resetZoom, resolveTheme, toggleTheme, unlockAll, zoomBy } from "../state/operations";
 import { Icon } from "./icons";
 import { useStore, useStoreVersion } from "./StoreContext";
 
@@ -8,6 +8,7 @@ export function Footer() {
   const store = useStore();
   useStoreVersion();
   const { zoom } = store.state;
+  const locked = lockedCount(store);
   return (
     <div className="footer">
       <div className="island group" aria-label="Zoom">
@@ -43,6 +44,26 @@ export function Footer() {
           <Icon name="redo" />
         </button>
       </div>
+      <div className="island group">
+        <button
+          type="button"
+          className="btn"
+          title={`${t("action.clearCanvas")} — ${actionByName("clearCanvas")?.shortcut}`}
+          disabled={store.scene.visible().length === 0}
+          data-testid="clear-canvas"
+          onClick={() => requestClearCanvas(store)}
+        >
+          <Icon name="trash" />
+        </button>
+      </div>
+      {locked > 0 && (
+        <div className="island group">
+          <button type="button" className="btn-text" title={`${t("action.unlockAll")} — ${actionByName("unlockAll")?.shortcut}`} data-testid="unlock-all" onClick={() => unlockAll(store)}>
+            <Icon name="unlock" size={16} />
+            Unlock {locked}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

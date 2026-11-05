@@ -37,6 +37,7 @@ export const DEFAULT_STYLE: ItemStyle = {
   startArrowhead: null,
   endArrowhead: "arrow",
   arrowType: "sharp",
+  lineCurved: false,
   simulatePressure: true,
 };
 

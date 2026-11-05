@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { startEyedropper } from "../state/operations";
 import { PALETTE, normalizeHex } from "./colors";
+import { Icon } from "./icons";
+import { Popover } from "./Popover";
+import { useStore } from "./StoreContext";
 
 interface Props {
   /** Current colour, or null when a mixed selection has different colours. */
@@ -11,6 +15,8 @@ interface Props {
   onChange: (color: string) => void;
   testId: string;
   label: string;
+  /** Offers a button to pick the colour from the canvas, setting this colour. */
+  eyedropper?: "stroke" | "background";
 }
 
 const swatchStyle = (c: string | null) => (c && c !== "transparent" ? { backgroundColor: c } : undefined);
@@ -30,32 +36,14 @@ function Swatch({ color, selected, onPick, title, testId }: { color: string; sel
   );
 }
 
-/** Quick picks plus a popover with the full palette (5 shades per colour) and a hex field. */
-export function ColorField({ value, picks, allowTransparent, onChange, testId, label }: Props) {
+/** Quick picks plus a popover with the full palette (5 shades per colour), a hex field and an eyedropper. */
+export function ColorField({ value, picks, allowTransparent, onChange, testId, label, eyedropper }: Props) {
+  const store = useStore();
   const [open, setOpen] = useState(false);
   const [hex, setHex] = useState("");
   const [invalid, setInvalid] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        // Closing the popover must not also fall through to the global Escape (deselect / back to selection tool).
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
     setHex(value && value !== "transparent" ? value : "");
@@ -74,13 +62,14 @@ export function ColorField({ value, picks, allowTransparent, onChange, testId, l
   };
 
   return (
-    <div className="color-field" ref={rootRef} data-testid={testId}>
+    <div className="color-field" data-testid={testId}>
       <div className="choices">
         {picks.map((c) => (
           <Swatch key={c} color={c} selected={value === c} onPick={() => pick(c)} title={c === "transparent" ? t("color.transparent") : c} />
         ))}
         <span className="sep" />
         <button
+          ref={anchorRef}
           type="button"
           className={`swatch current${value === "transparent" ? " transparent" : ""}`}
           style={swatchStyle(value)}
@@ -89,9 +78,20 @@ export function ColorField({ value, picks, allowTransparent, onChange, testId, l
           data-testid={`${testId}-open`}
           onClick={() => setOpen((o) => !o)}
         />
+        {eyedropper && (
+          <button
+            type="button"
+            className="btn small"
+            title={`${t("action.eyedropper")} — I`}
+            data-testid={`${testId}-eyedropper`}
+            onClick={() => startEyedropper(store, eyedropper)}
+          >
+            <Icon name="eyedropper" size={16} />
+          </button>
+        )}
       </div>
       {open && (
-        <div className="popover island" role="dialog" aria-label={label}>
+        <Popover anchor={anchorRef} onClose={close} label={label}>
           <div className="palette">
             {[0, 1, 2, 3, 4].map((shade) =>
               PALETTE.map((hue) => (
@@ -126,7 +126,7 @@ export function ColorField({ value, picks, allowTransparent, onChange, testId, l
               />
             </label>
           </div>
-        </div>
+        </Popover>
       )}
     </div>
   );

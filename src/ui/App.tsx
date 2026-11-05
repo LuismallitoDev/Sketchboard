@@ -1,13 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import { InteractionController } from "../input/controller";
 import { installKeyboard } from "../input/keyboard";
-import { resolveTheme } from "../state/operations";
+import { closeDialog, confirmClearCanvas, resolveTheme } from "../state/operations";
 import type { Store } from "../state/store";
 import { CanvasLayer } from "./CanvasLayer";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { Footer, ThemeToggle } from "./Footer";
 import { PropertiesPanel } from "./PropertiesPanel";
-import { StoreProvider } from "./StoreContext";
+import { StoreProvider, useStore, useStoreVersion } from "./StoreContext";
 import { Toolbar } from "./Toolbar";
+
+/** Modal dialogs requested through the app state. */
+function Dialogs() {
+  const store = useStore();
+  useStoreVersion();
+  if (store.state.dialog !== "clear") return null;
+  return (
+    <ConfirmDialog
+      title="Clear the canvas?"
+      message="This removes everything from the canvas. You can undo it afterwards."
+      confirmLabel="Clear canvas"
+      onConfirm={() => confirmClearCanvas(store)}
+      onCancel={() => closeDialog(store)}
+    />
+  );
+}
 
 export function App({ store }: { store: Store }) {
   const controller = useMemo(() => new InteractionController(store), [store]);
@@ -49,6 +66,7 @@ export function App({ store }: { store: Store }) {
         <PropertiesPanel />
         <ThemeToggle />
         <Footer />
+        <Dialogs />
       </div>
     </StoreProvider>
   );

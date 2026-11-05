@@ -1,5 +1,7 @@
 import { History } from "../history/history";
+import { syncBoundTexts } from "../scene/boundText";
 import { Scene } from "../scene/scene";
+import { resolveSelection } from "../scene/selection";
 import { defaultAppState, type AppState } from "./appState";
 
 /** Scene + app state + history in one observable object. React reads it through useSyncExternalStore. */
@@ -12,7 +14,9 @@ export class Store {
 
   constructor(initial?: Partial<AppState>) {
     this.current = { ...defaultAppState(), ...initial };
-    this.history = new History(this.scene, (ids) => this.select(ids));
+    this.scene.addNormalizer(syncBoundTexts);
+    // After undo/redo, select what changed (a label stands for its container).
+    this.history = new History(this.scene, (ids) => this.select(resolveSelection(this.scene.visible(), ids, { groups: false })));
     this.scene.subscribe(() => this.notify());
   }
 

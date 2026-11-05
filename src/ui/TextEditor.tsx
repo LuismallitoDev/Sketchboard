@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { measureText } from "../geometry/text";
+import { layoutPatchForText, measureText } from "../geometry/text";
 import { FONT_FAMILY_CSS } from "../scene/constants";
 import type { TextElement } from "../scene/types";
 import { finishTextEdit } from "../state/operations";
@@ -31,20 +31,32 @@ function TextEditorInner({ el }: { el: TextElement }) {
   const onChange = (text: string) => {
     const cur = store.scene.get(el.id) as TextElement | undefined;
     if (!cur) return;
+    if (cur.containerId) {
+      // A label is laid out by its container (wrapping, growing the shape, centring).
+      store.scene.update(el.id, { text });
+      return;
+    }
+    if (cur.wrapWidth !== null) {
+      store.scene.update(el.id, { text, ...layoutPatchForText(cur, { text }) });
+      return;
+    }
+    // Text that fits itself grows in the direction its alignment implies.
     const m = measureText(text, cur.fontSize, cur.fontFamily, cur.lineHeight);
-    // Keep the anchor that matches the alignment, so the text grows in the expected direction.
     const x = cur.textAlign === "left" ? cur.x : cur.textAlign === "center" ? cur.x + cur.width / 2 - m.width / 2 : cur.x + cur.width - m.width;
     store.scene.update(el.id, { text, width: m.width, height: m.height, x });
   };
 
-  const left = el.x * zoom + offsetX;
-  const top = el.y * zoom + offsetY;
+  const wrapped = el.wrapWidth !== null;
+  const centreX = (el.x + el.width / 2) * zoom + offsetX;
+  // Wrapped text needs a textarea as wide as its wrap width so the browser breaks lines where the layout did.
+  const width = wrapped ? el.wrapWidth! * zoom + 2 : Math.max(el.width * zoom + 6, el.containerId ? 40 : 8);
+  const left = el.containerId ? centreX - width / 2 : el.x * zoom + offsetX;
   return (
     <textarea
       ref={ref}
       className="text-editor"
       data-testid="text-editor"
-      wrap="off"
+      wrap={wrapped ? "soft" : "off"}
       spellCheck={false}
       value={el.text}
       onChange={(e) => onChange(e.target.value)}
@@ -60,13 +72,15 @@ function TextEditorInner({ el }: { el: TextElement }) {
       }}
       style={{
         left,
-        top,
-        width: Math.max(el.width * zoom + 6, 8),
+        top: el.y * zoom + offsetY,
+        width,
         height: Math.max(el.height * zoom, el.fontSize * el.lineHeight * zoom),
         font: `${el.fontSize * zoom}px ${FONT_FAMILY_CSS[el.fontFamily]}`,
         lineHeight: el.lineHeight,
         color: el.strokeColor,
         textAlign: el.textAlign,
+        whiteSpace: wrapped ? "pre-wrap" : "pre",
+        overflowWrap: wrapped ? "break-word" : undefined,
         opacity: el.opacity / 100,
         transform: el.angle ? `rotate(${el.angle}rad)` : undefined,
       }}

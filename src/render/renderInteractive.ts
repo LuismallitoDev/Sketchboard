@@ -1,4 +1,5 @@
 import { boxCenter, getLocalBox } from "../geometry/bounds";
+import { linearHandles } from "../geometry/linearEdit";
 import {
   CORNER_HANDLES,
   HANDLE_PAD,
@@ -17,8 +18,10 @@ export const ACCENT_DARK = "#2dd4bf";
 /** Which handles a selection offers (text only scales from its corners). */
 export function allowedHandles(selected: readonly SketchElement[]): HandleName[] {
   if (selected.length === 1 && selected[0].locked) return [];
-  const cornersOnly = selected.some((e) => e.type === "text");
-  return cornersOnly ? ["rotate", ...CORNER_HANDLES] : ["rotate", ...RESIZE_HANDLES];
+  // A single text scales from its corners and wraps from its sides; mixed with other elements only corners apply.
+  if (selected.length === 1 && selected[0].type === "text") return ["rotate", ...CORNER_HANDLES, "e", "w"];
+  if (selected.some((e) => e.type === "text")) return ["rotate", ...CORNER_HANDLES];
+  return ["rotate", ...RESIZE_HANDLES];
 }
 
 /** Selection outlines, resize/rotate handles and the rubber-band box on the transparent overlay canvas. */
@@ -47,6 +50,30 @@ export function renderInteractive(
   }
 
   if (selected.length === 0 || state.editingTextId) return;
+
+  // Point-editing mode: handles on the vertices and midpoints instead of the usual frame.
+  const editing = state.editingLinearId ? selected.find((e) => e.id === state.editingLinearId) : undefined;
+  if (editing && (editing.type === "line" || editing.type === "arrow")) {
+    const { points, mids } = linearHandles(editing);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = accent;
+    ctx.fillStyle = dark ? "rgba(45,212,191,0.45)" : "rgba(13,148,136,0.4)";
+    for (const m of mids) {
+      const [sx, sy] = sceneToScreen(state, m[0], m[1]);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    points.forEach((p, i) => {
+      const [sx, sy] = sceneToScreen(state, p[0], p[1]);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = state.selectedPoints.includes(i) ? accent : dark ? "#1f2937" : "#ffffff";
+      ctx.fill();
+      ctx.stroke();
+    });
+    return;
+  }
 
   // Outline every selected element when several are selected.
   if (selected.length > 1) {

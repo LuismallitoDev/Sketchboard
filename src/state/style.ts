@@ -22,11 +22,18 @@ export function stylePatchFor(el: SketchElement, p: Partial<ItemStyle>): Partial
   if (el.type === "rectangle" || el.type === "diamond") {
     if (p.roundness !== undefined) out.roundness = p.roundness;
   }
+  // A closed line can be filled like a shape.
+  if (el.type === "line" && el.polygon) {
+    if (p.backgroundColor !== undefined) out.backgroundColor = p.backgroundColor;
+    if (p.fillStyle !== undefined) out.fillStyle = p.fillStyle;
+  }
   if (el.type === "arrow") {
     if (p.startArrowhead !== undefined) out.startArrowhead = p.startArrowhead;
     if (p.endArrowhead !== undefined) out.endArrowhead = p.endArrowhead;
     if (p.arrowType !== undefined) out.arrowType = p.arrowType;
   }
+  // Lines are straight or curved ("round" arrow type under the hood).
+  if (el.type === "line" && p.lineCurved !== undefined) out.arrowType = p.lineCurved ? "round" : "sharp";
   if (el.type === "freedraw" && p.simulatePressure !== undefined) out.simulatePressure = p.simulatePressure;
   if (el.type === "text") {
     if (p.fontFamily !== undefined) out.fontFamily = p.fontFamily;
