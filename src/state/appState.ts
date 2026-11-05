@@ -1,4 +1,5 @@
 import type { Box } from "../geometry/bounds";
+import type { Guide } from "../geometry/snap";
 import { DEFAULT_STYLE, DEFAULT_VIEW_BACKGROUND } from "../scene/constants";
 import type { ItemStyle } from "../scene/types";
 
@@ -49,6 +50,18 @@ export interface AppState {
   /** Style copied with "copy style", pasted onto other elements. */
   copiedStyle: Partial<ItemStyle> | null;
 
+  /** Arrow ends attach to shapes they are dropped on. */
+  arrowBinding: boolean;
+  /** An attached arrow aims at the middle of the nearest side instead of where it was dropped. */
+  midpointSnapping: boolean;
+  /** Moving, resizing and drawing snap to other elements (alignment lines, equal gaps). */
+  objectsSnap: boolean;
+  gridMode: boolean;
+  /** Alignment and gap guides shown while snapping (transient). */
+  snapGuides: readonly Guide[];
+  /** The shape an arrow end would attach to right now (transient). */
+  bindingHighlight: string | null;
+
   theme: Theme;
   viewBackgroundColor: string;
   /** Style applied to the next element. */
@@ -75,6 +88,12 @@ export function defaultAppState(): AppState {
     eyedropper: null,
     dialog: null,
     copiedStyle: null,
+    arrowBinding: true,
+    midpointSnapping: false,
+    objectsSnap: false,
+    gridMode: false,
+    snapGuides: [],
+    bindingHighlight: null,
     theme: "system",
     viewBackgroundColor: DEFAULT_VIEW_BACKGROUND,
     currentItem: { ...DEFAULT_STYLE },
@@ -82,5 +101,16 @@ export function defaultAppState(): AppState {
 }
 
 /** The part of the app state saved with a scene (everything else is transient). */
-export const PERSISTED_KEYS = ["offsetX", "offsetY", "zoom", "theme", "viewBackgroundColor", "currentItem"] as const;
+export const PERSISTED_KEYS = [
+  "offsetX",
+  "offsetY",
+  "zoom",
+  "theme",
+  "viewBackgroundColor",
+  "currentItem",
+  "arrowBinding",
+  "midpointSnapping",
+  "objectsSnap",
+  "gridMode",
+] as const;
 export type PersistedState = Pick<AppState, (typeof PERSISTED_KEYS)[number]>;

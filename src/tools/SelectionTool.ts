@@ -1,8 +1,10 @@
-import { boundsContain, boxCenter, getElementBounds, isPointInBox, type Box } from "../geometry/bounds";
+import { boundsContain, boxCenter, getCommonBounds, getElementBounds, isPointInBox, type Box } from "../geometry/bounds";
 import { topElementAt } from "../geometry/hit";
 import { hitLinearHandle, insertPointPatch, linearHandles, movePointsPatch } from "../geometry/linearEdit";
 import { distance, snapAngle, type Point } from "../geometry/math";
+import { snapBoundsToTargets, snapToGrid } from "../geometry/snap";
 import {
+  HANDLE_DIRS,
   getSelectionFrame,
   handleAnchorPoint,
   hitHandle,
@@ -12,12 +14,14 @@ import {
   type HandleName,
   type ResizeHandle,
 } from "../geometry/transform";
+import { clearGuides, setGuides, snapMode, snapPointer, snapTargets, snapThreshold } from "../input/snapping";
 import type { PointerInfo, ToolHandler } from "../input/types";
 import { allowedHandles } from "../render/renderInteractive";
+import { findBindingTarget } from "../scene/binding";
 import { cloneElements } from "../scene/factory";
 import { groupAwareBoxSelection, isBoundText, resolveSelection, withBoundTexts } from "../scene/selection";
 import type { LinearElement, SketchElement } from "../scene/types";
-import { exitLinearEdit, removeSelectedPoints, selectedElements, selectIds } from "../state/operations";
+import { detachUnselectedArrows, exitLinearEdit, removeSelectedPoints, selectedElements, selectIds } from "../state/operations";
 import type { Store } from "../state/store";
 
 type Mode =
@@ -52,7 +56,8 @@ const CURSORS: Record<HandleName, string> = {
 /**
  * Click, Shift-click, box select, drag to move (Alt = duplicate), resize and rotate handles. Selecting an element
  * selects its whole group (Ctrl/Cmd-click picks one member). While a line is in point-editing mode the pointer
- * works on its points instead.
+ * works on its points instead. Moving, resizing and drawing snap to the grid or to other elements when those
+ * modes are on (Ctrl/Cmd switches snapping off while dragging).
  */
 export class SelectionTool implements ToolHandler {
   private mode: Mode | null = null;
@@ -188,10 +193,34 @@ export class SelectionTool implements ToolHandler {
     return true;
   }
 
+  /** Applies grid or object snapping to a drag of the selection by (dx, dy). */
+  private snapMove(originals: readonly SketchElement[], dx: number, dy: number, e: PointerInfo) {
+    const store = this.store;
+    const mode = snapMode(store, e.ctrlKey || e.metaKey);
+    const b0 = getCommonBounds(originals);
+    if (!b0 || !mode) {
+      clearGuides(store);
+      return { dx, dy };
+    }
+    if (mode === "grid") {
+      clearGuides(store);
+      return { dx: snapToGrid(b0[0] + dx) - b0[0], dy: snapToGrid(b0[1] + dy) - b0[1] };
+    }
+    const r = snapBoundsToTargets(
+      [b0[0] + dx, b0[1] + dy, b0[2] + dx, b0[3] + dy],
+      snapTargets(store, new Set(originals.map((o) => o.id))),
+      snapThreshold(store),
+    );
+    setGuides(store, r.guides);
+    return { dx: dx + r.dx, dy: dy + r.dy };
+  }
+
   move(e: PointerInfo) {
     const m = this.mode;
     if (!m) return;
-    const scene = this.store.scene;
+    const store = this.store;
+    const scene = store.scene;
+    const ctrl = e.ctrlKey || e.metaKey;
 
     if (m.kind === "move") {
       if (!m.moved) {
@@ -202,10 +231,11 @@ export class SelectionTool implements ToolHandler {
           const copies = cloneElements(withBoundTexts(scene.visible(), m.originals), 0, 0);
           scene.batch(() => copies.forEach((c) => scene.add(c)));
           const movable = copies.filter((c) => !isBoundText(c));
-          this.store.select(movable.map((c) => c.id));
+          store.select(movable.map((c) => c.id));
           m.originals = movable;
           m.duplicated = true;
         }
+        detachUnselectedArrows(store, m.originals);
       }
       let dx = e.scene[0] - m.startScene[0];
       let dy = e.scene[1] - m.startScene[1];
@@ -213,15 +243,22 @@ export class SelectionTool implements ToolHandler {
         if (Math.abs(dx) > Math.abs(dy)) dy = 0;
         else dx = 0;
       }
+      ({ dx, dy } = this.snapMove(m.originals, dx, dy, e));
       scene.batch(() => {
         for (const o of m.originals) if (!o.locked) scene.update(o.id, { x: o.x + dx, y: o.y + dy });
       });
     } else if (m.kind === "resize") {
-      const p: Point = [e.scene[0] - m.grab[0], e.scene[1] - m.grab[1]];
+      if (!m.changed) detachUnselectedArrows(store, m.originals);
+      let p: Point = [e.scene[0] - m.grab[0], e.scene[1] - m.grab[1]];
+      if (m.frame.angle === 0) {
+        const [sx, sy] = HANDLE_DIRS[m.handle];
+        p = snapPointer(store, p, new Set(m.originals.map((o) => o.id)), ctrl, { x: sx !== 0, y: sy !== 0 });
+      }
       const patches = resizeSelection(m.originals, m.frame, m.handle, p, e.shiftKey);
       scene.batch(() => patches.forEach(([id, patch]) => scene.update(id, patch)));
       m.changed = true;
     } else if (m.kind === "rotate") {
+      if (!m.changed) detachUnselectedArrows(store, m.originals);
       let delta = Math.atan2(e.scene[1] - m.center[1], e.scene[0] - m.center[0]) - m.startAngle;
       if (e.shiftKey) {
         // Snap the resulting angle (single element) or the turn itself (group) to 15-degree steps.
@@ -233,9 +270,23 @@ export class SelectionTool implements ToolHandler {
     } else if (m.kind === "point") {
       const dx = e.scene[0] - m.start[0];
       const dy = e.scene[1] - m.start[1];
-      if (!m.changed && Math.hypot(dx, dy) * this.store.state.zoom < 2) return;
+      if (!m.changed && Math.hypot(dx, dy) * store.state.zoom < 2) return;
       m.changed = true;
-      scene.update(m.original.id, movePointsPatch(m.original, m.indices, dx, dy));
+      let patch: Partial<LinearElement> = movePointsPatch(m.original, m.indices, dx, dy);
+      const el = m.original;
+      const last = el.points.length - 1;
+      if (el.type === "arrow" && !el.polygon && m.indices.length === 1 && (m.indices[0] === 0 || m.indices[0] === last)) {
+        // Dragging an arrow's end: attach it to the shape under the pointer, or let go.
+        const isStart = m.indices[0] === 0;
+        const otherShape = (isStart ? el.endBinding : el.startBinding)?.elementId;
+        const t =
+          store.state.arrowBinding && !ctrl
+            ? findBindingTarget(scene.visible(), e.scene, store.state.zoom, new Set(otherShape ? [otherShape] : []), store.state.midpointSnapping)
+            : null;
+        store.setState({ bindingHighlight: t?.shape.id ?? null });
+        patch = { ...patch, [isStart ? "startBinding" : "endBinding"]: t?.binding ?? null };
+      }
+      scene.update(el.id, patch);
     } else {
       const box: Box = {
         x: Math.min(m.origin[0], e.scene[0]),
@@ -247,8 +298,8 @@ export class SelectionTool implements ToolHandler {
       const visible = scene.visible();
       const inside = new Set(visible.filter((el) => !el.locked && boundsContain(outer, getElementBounds(el))).map((el) => el.id));
       const picked = groupAwareBoxSelection(visible, inside);
-      this.store.select(m.additive ? resolveSelection(visible, [...m.base, ...picked], { groups: false }) : picked);
-      this.store.setState({ selectionBox: box });
+      store.select(m.additive ? resolveSelection(visible, [...m.base, ...picked], { groups: false }) : picked);
+      store.setState({ selectionBox: box });
     }
   }
 
@@ -257,6 +308,8 @@ export class SelectionTool implements ToolHandler {
     this.mode = null;
     if (!m) return;
     const store = this.store;
+    clearGuides(store);
+    if (store.state.bindingHighlight) store.setState({ bindingHighlight: null });
     if (m.kind === "move") {
       if (m.moved) {
         store.commit();
@@ -292,6 +345,7 @@ export class SelectionTool implements ToolHandler {
 
   cancel() {
     this.mode = null;
-    this.store.setState({ selectionBox: null });
+    clearGuides(this.store);
+    this.store.setState({ selectionBox: null, bindingHighlight: null });
   }
 }

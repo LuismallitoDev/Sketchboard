@@ -265,6 +265,7 @@ export function PropertiesPanel() {
             options={[
               { id: "sharp", value: "sharp" as const, title: "Sharp arrow", node: <Icon name="straight" size={18} /> },
               { id: "round", value: "round" as const, title: "Curved arrow", node: <Icon name="curved" size={18} /> },
+              { id: "elbow", value: "elbow" as const, title: "Elbow arrow", node: <Icon name="elbow" size={18} /> },
             ]}
           />
           <section>

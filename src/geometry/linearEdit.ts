@@ -10,9 +10,14 @@ const isCurved = (el: LinearElement) => el.arrowType === "round" && el.points.le
 
 const abs = (el: LinearElement): Point[] => el.points.map((p): Point => [el.x + p[0], el.y + p[1]]);
 
-/** Drag handles of a line in point-editing mode: the vertices, and a midpoint between each pair to insert a new one. */
-export function linearHandles(el: LinearElement): { points: Point[]; mids: Point[] } {
+/**
+ * Drag handles of a line in point-editing mode: the vertices, and a midpoint between each pair to insert a new one.
+ * `editable` lists the vertices that can be dragged: all of them, except for an elbow arrow, whose route is derived
+ * from its two ends (so it has no midpoints either).
+ */
+export function linearHandles(el: LinearElement): { points: Point[]; mids: Point[]; editable: number[] } {
   const pts = abs(el);
+  if (el.type === "arrow" && el.arrowType === "elbow") return { points: pts, mids: [], editable: [0, pts.length - 1] };
   const mids: Point[] = [];
   const segs = isCurved(el) ? curveSegments(pts) : null;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -28,15 +33,16 @@ export function linearHandles(el: LinearElement): { points: Point[]; mids: Point
     }
   }
   // The closing point of a polygon is the same handle as its first point.
-  return { points: el.polygon ? pts.slice(0, -1) : pts, mids };
+  const points = el.polygon ? pts.slice(0, -1) : pts;
+  return { points, mids, editable: points.map((_, i) => i) };
 }
 
 export type LinearHit = { kind: "point"; index: number } | { kind: "mid"; index: number };
 
 /** Which handle is under the point (vertices win over midpoints). `index` of a midpoint is the vertex before it. */
 export function hitLinearHandle(el: LinearElement, p: Point, zoom: number): LinearHit | null {
-  const { points, mids } = linearHandles(el);
-  for (let i = 0; i < points.length; i++) if (distance(p, points[i]) <= POINT_HANDLE_RADIUS / zoom) return { kind: "point", index: i };
+  const { points, mids, editable } = linearHandles(el);
+  for (const i of editable) if (distance(p, points[i]) <= POINT_HANDLE_RADIUS / zoom) return { kind: "point", index: i };
   for (let i = 0; i < mids.length; i++) if (distance(p, mids[i]) <= MID_HANDLE_RADIUS / zoom) return { kind: "mid", index: i };
   return null;
 }

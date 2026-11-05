@@ -1,4 +1,5 @@
 import { boundsOverlap, getElementBounds, getLocalBox, type Bounds } from "../geometry/bounds";
+import { GRID_SIZE } from "../geometry/snap";
 import type { SketchElement } from "../scene/types";
 import type { AppState } from "../state/appState";
 import { drawElement, getRenderPad } from "./elementCanvas";
@@ -12,6 +13,7 @@ export function renderStatic(canvas: HTMLCanvasElement, state: AppState, element
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = state.viewBackgroundColor;
   ctx.fillRect(0, 0, state.width, state.height);
+  if (state.gridMode) drawGrid(ctx, state);
 
   const view: Bounds = [
     -state.offsetX / state.zoom,
@@ -36,6 +38,39 @@ export function renderStatic(canvas: HTMLCanvasElement, state: AppState, element
     if (el.id === state.editingTextId) continue;
     drawElement(ctx, el, state, dpr, alpha);
   }
+}
+
+/** Faint grid lines every GRID_SIZE units (stronger every fifth), coarser when zoomed far out. */
+function drawGrid(ctx: CanvasRenderingContext2D, state: AppState) {
+  const z = state.zoom;
+  let step = GRID_SIZE;
+  while (step * z < 8) step *= 5;
+  const major = GRID_SIZE * 5;
+  const minorPath = new Path2D();
+  const majorPath = new Path2D();
+  const x0 = Math.floor(-state.offsetX / z / step) * step;
+  const x1 = (state.width - state.offsetX) / z;
+  for (let x = x0; x <= x1; x += step) {
+    const sx = Math.round(x * z + state.offsetX) + 0.5;
+    const path = Math.abs(x % major) < 1e-6 ? majorPath : minorPath;
+    path.moveTo(sx, 0);
+    path.lineTo(sx, state.height);
+  }
+  const y0 = Math.floor(-state.offsetY / z / step) * step;
+  const y1 = (state.height - state.offsetY) / z;
+  for (let y = y0; y <= y1; y += step) {
+    const sy = Math.round(y * z + state.offsetY) + 0.5;
+    const path = Math.abs(y % major) < 1e-6 ? majorPath : minorPath;
+    path.moveTo(0, sy);
+    path.lineTo(state.width, sy);
+  }
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.06)";
+  ctx.stroke(minorPath);
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.13)";
+  ctx.stroke(majorPath);
+  ctx.restore();
 }
 
 function drawLabelBacking(ctx: CanvasRenderingContext2D, el: SketchElement, state: AppState, alpha: number) {

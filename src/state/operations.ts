@@ -91,9 +91,27 @@ export function duplicateSelected(store: Store) {
   store.commit();
 }
 
+/**
+ * Before elements are moved by hand: arrows that move without the shapes they are attached to let go of them
+ * (arrows that move together with their shapes stay attached).
+ */
+export function detachUnselectedArrows(store: Store, moving: readonly SketchElement[]) {
+  const ids = new Set(moving.map((e) => e.id));
+  const loose: Array<[string, Partial<LinearElement>]> = [];
+  for (const el of moving) {
+    if (el.type !== "arrow") continue;
+    const patch: Partial<LinearElement> = {};
+    if (el.startBinding && !ids.has(el.startBinding.elementId)) patch.startBinding = null;
+    if (el.endBinding && !ids.has(el.endBinding.elementId)) patch.endBinding = null;
+    if (Object.keys(patch).length > 0) loose.push([el.id, patch]);
+  }
+  if (loose.length > 0) store.scene.batch(() => loose.forEach(([id, p]) => store.scene.update(id, p)));
+}
+
 export function nudgeSelected(store: Store, dx: number, dy: number) {
   const sel = selectedElements(store).filter((e) => !e.locked);
   if (sel.length === 0) return;
+  detachUnselectedArrows(store, sel);
   store.scene.batch(() => {
     for (const el of sel) store.scene.update(el.id, { x: el.x + dx, y: el.y + dy });
   });
@@ -127,16 +145,29 @@ export function moveSelectedZ(store: Store, move: ZMove) {
 }
 
 export function alignSelected(store: Store, kind: AlignKind) {
-  if (applyPatches(store, alignPatches(selectedElements(store), kind))) store.commit();
+  const sel = selectedElements(store);
+  detachUnselectedArrows(store, sel);
+  if (applyPatches(store, alignPatches(sel, kind))) store.commit();
 }
 
 export function distributeSelected(store: Store, axis: "h" | "v") {
-  if (applyPatches(store, distributePatches(selectedElements(store), axis))) store.commit();
+  const sel = selectedElements(store);
+  detachUnselectedArrows(store, sel);
+  if (applyPatches(store, distributePatches(sel, axis))) store.commit();
 }
 
 export function flipSelected(store: Store, axis: "h" | "v") {
   const sel = selectedElements(store).filter((e) => !e.locked);
+  detachUnselectedArrows(store, sel);
   if (applyPatches(store, flipPatches(sel, axis))) store.commit();
+}
+
+// ---------------------------------------------------------------- snapping and binding preferences
+
+export type Preference = "arrowBinding" | "midpointSnapping" | "objectsSnap" | "gridMode";
+
+export function togglePreference(store: Store, key: Preference) {
+  store.setState({ [key]: !store.state[key] });
 }
 
 /** Locks the selection: locked elements cannot be selected, moved or erased until unlocked. */
@@ -175,12 +206,19 @@ export function styleOfElement(el: SketchElement): Partial<ItemStyle> {
   return s;
 }
 
-/** A curved arrow or line needs a middle point to bend; two-point ones get a gentle bow. */
-function bowIfNeeded(el: LinearElement, patch: Partial<ItemStyle>): Partial<LinearElement> | null {
-  const wantsCurve = (el.type === "arrow" && patch.arrowType === "round") || (el.type === "line" && patch.lineCurved === true);
-  if (!wantsCurve || el.points.length !== 2) return null;
-  const a = linearAbsPoints(el);
-  return linearPatchFromAbs([a[0], bowPoint(a[0], a[1], 0.2), a[1]]);
+/**
+ * Points a line or arrow needs after a style change: a curved one needs a middle point to bend (two-point ones get a
+ * gentle bow), and an arrow leaving elbow mode keeps just its two ends (an elbow route is derived from them).
+ */
+function pointsAfterStyle(el: LinearElement, patch: Partial<ItemStyle>): Partial<LinearElement> | null {
+  let abs: Point[] = linearAbsPoints(el);
+  const before = abs.length;
+  if (el.type === "arrow" && patch.arrowType !== undefined) {
+    if (el.arrowType === "elbow" && patch.arrowType !== "elbow") abs = [abs[0], abs[abs.length - 1]];
+    if (patch.arrowType === "round" && abs.length === 2) abs = [abs[0], bowPoint(abs[0], abs[1], 0.2), abs[1]];
+  }
+  if (el.type === "line" && patch.lineCurved === true && abs.length === 2) abs = [abs[0], bowPoint(abs[0], abs[1], 0.2), abs[1]];
+  return abs.length === before ? null : linearPatchFromAbs(abs);
 }
 
 function styleElements(store: Store, els: readonly SketchElement[], patch: Partial<ItemStyle>) {
@@ -190,7 +228,7 @@ function styleElements(store: Store, els: readonly SketchElement[], patch: Parti
       if (el.type === "text" && !el.containerId && (patch.fontSize || patch.fontFamily)) {
         Object.assign(p, layoutPatchForText(el, { fontSize: patch.fontSize ?? el.fontSize, fontFamily: patch.fontFamily ?? el.fontFamily }));
       }
-      if (el.type === "arrow" || el.type === "line") Object.assign(p, bowIfNeeded(el, patch) ?? {});
+      if (el.type === "arrow" || el.type === "line") Object.assign(p, pointsAfterStyle(el, patch) ?? {});
       if (Object.keys(p).length > 0) store.scene.update(el.id, p);
     }
   });

@@ -66,14 +66,15 @@ export function CanvasLayer({ controller }: { controller: InteractionController 
           resized = true;
         }
       }
-      const key = [els, s.offsetX, s.offsetY, s.zoom, s.width, s.height, s.viewBackgroundColor, s.editingTextId, s.erasingIds, dpr];
+      const key = [els, s.offsetX, s.offsetY, s.zoom, s.width, s.height, s.viewBackgroundColor, s.editingTextId, s.erasingIds, s.gridMode, dpr];
       if (resized || !lastStaticKey || key.some((v, i) => !Object.is(v, lastStaticKey![i]))) {
         renderStatic(st, s, els, dpr);
         lastStaticKey = key;
       }
       const ids = new Set(s.selectedIds);
       const selected = els.filter((e) => !e.isDeleted && ids.has(e.id));
-      renderInteractive(it, s, selected, dpr, resolveTheme(s.theme) === "dark");
+      const highlight = s.bindingHighlight ? (store.scene.get(s.bindingHighlight) ?? null) : null;
+      renderInteractive(it, s, selected, dpr, resolveTheme(s.theme) === "dark", highlight);
     };
 
     const request = () => {

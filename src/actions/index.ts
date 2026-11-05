@@ -26,6 +26,7 @@ import {
   selectedElements,
   setTool,
   startEyedropper,
+  togglePreference,
   toggleTheme,
   togglePolygonSelected,
   ungroupSelected,
@@ -34,7 +35,9 @@ import {
   wrapSelectedTextInContainer,
   zoomBy,
   zoomToFit,
+  type Preference,
 } from "../state/operations";
+import { createFlowchartNode, navigateFlowchart, type FlowDirection } from "../state/flowchart";
 import type { Store } from "../state/store";
 
 /**
@@ -114,8 +117,57 @@ const alignActions: Action[] = ALIGN_ACTIONS.map((a) => ({
   perform: (s) => alignSelected(s, a.kind),
 }));
 
+const FLOW_DIRS: { dir: FlowDirection; code: string; label: StringKey; navLabel: StringKey; arrow: string }[] = [
+  { dir: "up", code: "ArrowUp", label: "action.flowUp", navLabel: "action.navUp", arrow: "↑" },
+  { dir: "down", code: "ArrowDown", label: "action.flowDown", navLabel: "action.navDown", arrow: "↓" },
+  { dir: "left", code: "ArrowLeft", label: "action.flowLeft", navLabel: "action.navLeft", arrow: "←" },
+  { dir: "right", code: "ArrowRight", label: "action.flowRight", navLabel: "action.navRight", arrow: "→" },
+];
+
+const isConnectable = (s: Store) => {
+  const sel = selectedElements(s);
+  return sel.length === 1 && ["rectangle", "diamond", "ellipse"].includes(sel[0].type) && !sel[0].locked;
+};
+
+/** Ctrl/Cmd + arrow creates a connected shape; Alt + arrow moves along the connections. */
+const flowActions: Action[] = FLOW_DIRS.flatMap((d) => [
+  {
+    name: `flowchart:${d.dir}`,
+    label: t(d.label),
+    shortcut: `${MOD_LABEL}${d.arrow}`,
+    keyTest: (e: KeyboardEvent) => mod(e) && !e.shiftKey && !e.altKey && e.code === d.code,
+    enabled: isConnectable,
+    perform: (s: Store) => void createFlowchartNode(s, d.dir),
+  },
+  {
+    name: `navigate:${d.dir}`,
+    label: t(d.navLabel),
+    shortcut: `Alt+${d.arrow}`,
+    keyTest: (e: KeyboardEvent) => e.altKey && !mod(e) && !e.shiftKey && e.code === d.code,
+    enabled: isConnectable,
+    perform: (s: Store) => void navigateFlowchart(s, d.dir),
+  },
+]);
+
+const PREFERENCES: { key: Preference; label: StringKey; shortcut: string; test: (e: KeyboardEvent) => boolean }[] = [
+  { key: "gridMode", label: "action.toggleGrid", shortcut: `${MOD_LABEL}'`, test: (e) => mod(e) && !e.shiftKey && !e.altKey && e.code === "Quote" },
+  { key: "objectsSnap", label: "action.toggleObjectsSnap", shortcut: "Alt+S", test: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyS" },
+  { key: "arrowBinding", label: "action.toggleArrowBinding", shortcut: "Alt+B", test: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyB" },
+  { key: "midpointSnapping", label: "action.toggleMidpointSnapping", shortcut: "Alt+M", test: (e) => e.altKey && !mod(e) && !e.shiftKey && e.code === "KeyM" },
+];
+
+const preferenceActions: Action[] = PREFERENCES.map((p) => ({
+  name: `toggle:${p.key}`,
+  label: t(p.label),
+  shortcut: p.shortcut,
+  keyTest: p.test,
+  perform: (s) => togglePreference(s, p.key),
+}));
+
 export const actions: Action[] = [
   ...toolActions,
+  ...preferenceActions,
+  ...flowActions,
   {
     name: "toolLock",
     label: t("tool.lock"),

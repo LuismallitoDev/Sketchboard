@@ -6,3 +6,4 @@ playwright-report
 .wrangler
 .dev.vars
 .vercel
+dist-e2e

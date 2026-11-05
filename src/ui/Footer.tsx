@@ -1,8 +1,25 @@
 import { actionByName } from "../actions";
 import { t } from "../i18n";
-import { lockedCount, requestClearCanvas, resetZoom, resolveTheme, toggleTheme, unlockAll, zoomBy } from "../state/operations";
-import { Icon } from "./icons";
+import {
+  lockedCount,
+  requestClearCanvas,
+  resetZoom,
+  resolveTheme,
+  togglePreference,
+  toggleTheme,
+  unlockAll,
+  zoomBy,
+  type Preference,
+} from "../state/operations";
+import { Icon, type IconName } from "./icons";
 import { useStore, useStoreVersion } from "./StoreContext";
+
+const TOGGLES: { key: Preference; icon: IconName; testId: string }[] = [
+  { key: "gridMode", icon: "grid", testId: "toggle-grid" },
+  { key: "objectsSnap", icon: "magnet", testId: "toggle-objects-snap" },
+  { key: "arrowBinding", icon: "link", testId: "toggle-arrow-binding" },
+  { key: "midpointSnapping", icon: "midpoint", testId: "toggle-midpoint-snapping" },
+];
 
 export function Footer() {
   const store = useStore();
@@ -43,6 +60,21 @@ export function Footer() {
         >
           <Icon name="redo" />
         </button>
+      </div>
+      <div className="island group" role="group" aria-label="Snapping and connections">
+        {TOGGLES.map((tg) => (
+          <button
+            key={tg.key}
+            type="button"
+            className="btn"
+            aria-pressed={store.state[tg.key]}
+            title={`${actionByName(`toggle:${tg.key}`)?.label} — ${actionByName(`toggle:${tg.key}`)?.shortcut}`}
+            data-testid={tg.testId}
+            onClick={() => togglePreference(store, tg.key)}
+          >
+            <Icon name={tg.icon} />
+          </button>
+        ))}
       </div>
       <div className="island group">
         <button

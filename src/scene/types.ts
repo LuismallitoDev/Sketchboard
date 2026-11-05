@@ -30,10 +30,12 @@ export interface BoundElementRef {
   type: "arrow" | "text";
 }
 
-/** Arrow-to-shape binding (phase 3). */
+/** An arrow end attached to a shape. */
 export interface Binding {
   elementId: string;
-  focus: number;
+  /** Where the arrow aims inside the shape, as fractions of its box: [0.5, 0.5] is the centre. */
+  focus: Pt;
+  /** Distance kept between the arrow's tip and the shape's outline. */
   gap: number;
 }
 

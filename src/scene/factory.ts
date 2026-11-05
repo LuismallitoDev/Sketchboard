@@ -3,6 +3,7 @@ import { LINE_HEIGHT } from "./constants";
 import { newId, newNonce, newSeed } from "./ids";
 import { linearPatch } from "./linear";
 import type {
+  Binding,
   FreedrawElement,
   ItemStyle,
   LinearElement,
@@ -112,8 +113,7 @@ export function cloneElements(els: readonly SketchElement[], dx: number, dy: num
     if (!n) groupMap.set(g, (n = newId()));
     return n;
   };
-  const remapBinding = (b: { elementId: string; focus: number; gap: number } | null) =>
-    b && idMap.has(b.elementId) ? { ...b, elementId: idMap.get(b.elementId)! } : null;
+  const remapBinding = (b: Binding | null): Binding | null => (b && idMap.has(b.elementId) ? { ...b, elementId: idMap.get(b.elementId)! } : null);
 
   return els.map((el) => {
     const links = (el.boundElements ?? []).filter((b) => idMap.has(b.id)).map((b) => ({ ...b, id: idMap.get(b.id)! }));

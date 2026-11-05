@@ -5,6 +5,7 @@ import { linearPatchFromAbs } from "../scene/linear";
 import type {
   ArrowType,
   Arrowhead,
+  Binding,
   ElementType,
   FillStyle,
   FontFamily,
@@ -57,6 +58,15 @@ function restorePoints(v: unknown): Pt[] | null {
     out.push([p[0], p[1]]);
   }
   return out;
+}
+
+/** An arrow end attached to a shape; anything malformed is dropped (the arrow keeps its position, unattached). */
+function restoreBinding(v: unknown): Binding | null {
+  if (!v || typeof v !== "object") return null;
+  const b = v as Record<string, unknown>;
+  const focus = Array.isArray(b.focus) && b.focus.length === 2 && b.focus.every((n) => typeof n === "number" && Number.isFinite(n)) ? (b.focus as Pt) : [0.5, 0.5];
+  if (typeof b.elementId !== "string" || b.elementId === "") return null;
+  return { elementId: b.elementId, gap: Math.max(0, num(b.gap, 6)), focus: [focus[0], focus[1]] };
 }
 
 function nullableArrowhead(v: unknown, d: Arrowhead | null): Arrowhead | null {
@@ -120,8 +130,8 @@ export function restoreElement(raw: unknown): SketchElement | null {
         endArrowhead: type === "arrow" ? nullableArrowhead(r.endArrowhead, "arrow") : null,
         arrowType: oneOf(r.arrowType, ARROW_TYPES, "sharp"),
         polygon: type === "line" && bool(r.polygon, false) && pts.length >= 4,
-        startBinding: null,
-        endBinding: null,
+        startBinding: type === "arrow" ? restoreBinding(r.startBinding) : null,
+        endBinding: type === "arrow" ? restoreBinding(r.endBinding) : null,
       };
     }
     case "freedraw": {
@@ -213,6 +223,9 @@ export function restoreAppState(raw: unknown): Partial<PersistedState> {
   if (typeof r.zoom === "number" && Number.isFinite(r.zoom)) out.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, r.zoom));
   if (typeof r.theme === "string") out.theme = oneOf(r.theme, THEMES, "system");
   if (typeof r.viewBackgroundColor === "string") out.viewBackgroundColor = r.viewBackgroundColor;
+  for (const flag of ["arrowBinding", "midpointSnapping", "objectsSnap", "gridMode"] as const) {
+    if (typeof r[flag] === "boolean") out[flag] = r[flag] as boolean;
+  }
   if (r.currentItem !== undefined) out.currentItem = restoreItemStyle(r.currentItem);
   return out;
 }

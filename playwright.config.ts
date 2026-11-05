@@ -16,10 +16,13 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
   },
   // Fresh server every run (never reuse one). VITE_E2E exposes window.__sketchboard for assertions.
+  // The tests run against a production build served by `vite preview`: the dev server's module graph is heavy
+  // enough to run out of memory on a small laptop halfway through a long suite, the preview server is tiny.
   webServer: {
-    command: `npm run dev -- --port ${PORT}`,
+    command: `npx vite build --outDir dist-e2e --emptyOutDir && npx vite preview --outDir dist-e2e --port ${PORT} --strictPort`,
     port: PORT,
     reuseExistingServer: false,
+    timeout: 120_000,
     env: { VITE_E2E: "1" },
   },
 });

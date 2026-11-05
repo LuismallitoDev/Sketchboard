@@ -1,4 +1,5 @@
 import { actions } from "../actions";
+import { endFlowchartRun } from "../state/flowchart";
 import { nudgeSelected } from "../state/operations";
 import type { Store } from "../state/store";
 import type { InteractionController } from "./controller";
@@ -45,8 +46,13 @@ export function installKeyboard(store: Store, controller: InteractionController)
   };
   const onKeyUp = (e: KeyboardEvent) => {
     if (e.key === " ") controller.setSpace(false);
+    // Letting go of the modifier ends a run of "create connected shape" presses.
+    if (e.key === "Control" || e.key === "Meta") endFlowchartRun();
   };
-  const onBlur = () => controller.setSpace(false);
+  const onBlur = () => {
+    controller.setSpace(false);
+    endFlowchartRun();
+  };
 
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);

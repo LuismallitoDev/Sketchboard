@@ -45,7 +45,12 @@ export type IconName =
   | "unbindText"
   | "wrapText"
   | "straight"
-  | "curved";
+  | "curved"
+  | "elbow"
+  | "grid"
+  | "magnet"
+  | "link"
+  | "midpoint";
 
 const PATHS: Record<IconName, ReactNode> = {
   hand: <path d="M8 13V6.5a1.5 1.5 0 013 0V12 M11 11.5V4.5a1.5 1.5 0 013 0V12 M14 12V6.5a1.5 1.5 0 013 0V14c0 4.5-2.4 7-6 7-3 0-4.6-1.6-6.2-4.4l-1.7-3a1.5 1.5 0 012.5-1.6L8 14" />,
@@ -125,6 +130,11 @@ const PATHS: Record<IconName, ReactNode> = {
   wrapText: <path d="M3 5h18v14H3z M9 16V9h6 M12 9v7" />,
   straight: <path d="M4 18L20 6" />,
   curved: <path d="M4 18C8 4 14 22 20 6" />,
+  elbow: <path d="M4 18h8V6h8" />,
+  grid: <path d="M4 4h16v16H4z M4 9.33h16 M4 14.67h16 M9.33 4v16 M14.67 4v16" />,
+  magnet: <path d="M6 4v8a6 6 0 0012 0V4 M6 4h4v8a2 2 0 004 0V4h4 M6 8h4 M14 8h4" />,
+  link: <path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1 M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1" />,
+  midpoint: <path d="M3 12h18 M12 5v14 M8 12a4 4 0 118 0 4 4 0 01-8 0" />,
 };
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
